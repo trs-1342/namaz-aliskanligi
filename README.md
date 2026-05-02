@@ -7,11 +7,12 @@ sade ve hoş tasarımı ile odağı namaza aktarmış durumda.
 ---
 
 ## Kurulum
-```git clone https://github.com/trs-1342/namaz-aliskanligi.git```<br>
-```cd namaz-aliskanligi```<br>
-```npm install```<br>
-```npm run start:tunnel```<br>
 
+projenin reposunu indir: ```git clone https://github.com/trs-1342/namaz-aliskanligi.git```<br>
+projenin dizinine gir: ```cd namaz-aliskanligi```<br>
+projenin bağımlılıklarını indir: ```npm install```<br>
+projeyi başlat: ```npm run start```<br>
+expo go uygulamasını indir, sonra terminalden çıkan QR kodu ile okut, expo go uygulamasına yönlendirilecek ve çalıştırabileceksin.<br>
 ---
 
 ### İletişim ve Geri Bildirim
