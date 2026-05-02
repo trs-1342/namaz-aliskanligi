@@ -298,6 +298,21 @@ export function createAppStyles(
       marginTop: 4,
     },
 
+    statusValue: {
+      fontFamily: font.interSemi,
+      color: colors.primary,
+      fontSize: 12,
+      letterSpacing: 0.8,
+    },
+
+    offlineText: {
+      fontFamily: font.inter,
+      color: colors.onSurfaceVariant,
+      fontSize: 12,
+      lineHeight: 18,
+      opacity: 0.9,
+    },
+
     divider: {
       height: 1,
       width: '100%',

@@ -16,6 +16,8 @@ import {
   ViewStyle,
   Vibration,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import NetInfo from '@react-native-community/netinfo';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import * as Location from 'expo-location';
@@ -36,7 +38,11 @@ import {
 
 import { AppColors, ThemeMode, createShadow, themes } from './src/theme';
 import { createAppStyles } from './src/styles/appStyles';
-import { fetchPrayerTimes, PrayerTime } from './src/services/prayerTimes';
+import {
+  CachedPrayerDay,
+  fetchMonthlyPrayerCalendar,
+  PrayerTime,
+} from './src/services/prayerTimes';
 import { formatClock, getCurrentPrayer, getNextPrayer } from './src/utils/time';
 
 type Screen = 'home' | 'about';
@@ -52,6 +58,32 @@ type PrayerProgress = {
   progress: number;
 };
 
+type PrayerPrefs = Record<
+  string,
+  {
+    notification: boolean;
+    vibration: boolean;
+    alarm: boolean;
+  }
+>;
+
+type StoredAppState = {
+  language: Language;
+  themePreference: ThemePreference;
+  timeFormat: TimeFormat;
+  muteAll: boolean;
+  disableVibration: boolean;
+  disableAlarm: boolean;
+  locationEnabled: boolean;
+  coords: { latitude: number; longitude: number } | null;
+  prayerPrefs: PrayerPrefs;
+  snoozedUntilByKey: SnoozeMap;
+  cachedPrayerDays: CachedPrayerDay[];
+  scheduledPrayerNotificationIds: string[];
+};
+
+const STORAGE_KEY = 'namaz-aliskanligi:v1';
+
 const DICTS = {
   tr: {
     appTitle: 'Namaz Alışkanlığı',
@@ -65,6 +97,10 @@ const DICTS = {
     enableLocation: 'Konumu Aç',
     syncing: 'Senkronize',
     nextPrayer: 'Sıradaki',
+    internetStatus: 'İnternet Bağlantısı',
+    internetOnline: 'Bağlı',
+    internetOffline: 'Çevrimdışı',
+    offlineMode: 'Çevrimdışı mod: kayıtlı vakitler kullanılıyor.',
     systemSettings: 'Sistem Ayarları',
     muteAll: 'Tümünü Sustur',
     disableVibration: 'Titreşimleri Kapat',
@@ -98,7 +134,7 @@ const DICTS = {
     permissionDeniedTitle: 'Konum izni reddedildi',
     permissionDeniedBody: 'Namaz vakitleri için konum izni gerekiyor.',
     syncErrorTitle: 'Senkronizasyon hatası',
-    syncErrorBody: 'Konum veya namaz vakti alınamadı.',
+    syncErrorBody: 'Konum veya namaz vakti alınamadı. Kayıtlı vakitler varsa kullanılacak.',
     prayers: {
       fajr: 'İmsak',
       sunrise: 'Güneş',
@@ -120,6 +156,10 @@ const DICTS = {
     enableLocation: 'Enable Location',
     syncing: 'Syncing',
     nextPrayer: 'Next',
+    internetStatus: 'Internet Connection',
+    internetOnline: 'Online',
+    internetOffline: 'Offline',
+    offlineMode: 'Offline mode: saved prayer times are being used.',
     systemSettings: 'System Settings',
     muteAll: 'Mute All',
     disableVibration: 'Disable Vibrations',
@@ -153,7 +193,7 @@ const DICTS = {
     permissionDeniedTitle: 'Location permission denied',
     permissionDeniedBody: 'Location permission is required for prayer times.',
     syncErrorTitle: 'Sync error',
-    syncErrorBody: 'Location or prayer time could not be retrieved.',
+    syncErrorBody: 'Location or prayer time could not be retrieved. Saved data will be used if available.',
     prayers: {
       fajr: 'Fajr',
       sunrise: 'Sunrise',
@@ -175,6 +215,10 @@ const DICTS = {
     enableLocation: 'تفعيل الموقع',
     syncing: 'جاري المزامنة',
     nextPrayer: 'الصلاة التالية',
+    internetStatus: 'اتصال الإنترنت',
+    internetOnline: 'متصل',
+    internetOffline: 'غير متصل',
+    offlineMode: 'وضع عدم الاتصال: يتم استخدام الأوقات المحفوظة.',
     systemSettings: 'إعدادات النظام',
     muteAll: 'كتم الكل',
     disableVibration: 'إيقاف الاهتزاز',
@@ -208,7 +252,7 @@ const DICTS = {
     permissionDeniedTitle: 'تم رفض إذن الموقع',
     permissionDeniedBody: 'يلزم إذن الموقع لحساب أوقات الصلاة.',
     syncErrorTitle: 'خطأ في المزامنة',
-    syncErrorBody: 'تعذر جلب الموقع أو أوقات الصلاة.',
+    syncErrorBody: 'تعذر جلب الموقع أو أوقات الصلاة. سيتم استخدام البيانات المحفوظة إن وجدت.',
     prayers: {
       fajr: 'الفجر',
       sunrise: 'الشروق',
@@ -246,12 +290,17 @@ const fallbackPrayers: PrayerTime[] = [
 
 function detectDeviceLanguage(): Language {
   const locale = Intl.DateTimeFormat().resolvedOptions().locale.toLowerCase();
-
   if (locale.startsWith('tr')) return 'tr';
   if (locale.startsWith('en')) return 'en';
   if (locale.startsWith('ar')) return 'ar';
-
   return 'tr';
+}
+
+function getLocalDateKey(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 function getPrayerLabel(key: string, language: Language) {
@@ -324,8 +373,63 @@ function formatDurationValue(value: string | undefined, language: Language) {
 function formatSnoozeUntil(timestamp: number, language: Language, format: TimeFormat) {
   const date = new Date(timestamp);
   const value = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
-
   return formatTimeValue(value, language, format);
+}
+
+function getPrayerPrefs(prayers: PrayerTime[]): PrayerPrefs {
+  return prayers.reduce<PrayerPrefs>((acc, prayer) => {
+    acc[prayer.key] = {
+      notification: prayer.notification,
+      vibration: prayer.vibration,
+      alarm: prayer.alarm,
+    };
+    return acc;
+  }, {});
+}
+
+function applyPrayerPrefs(prayers: PrayerTime[], prefs: PrayerPrefs): PrayerTime[] {
+  return prayers.map((prayer) => ({
+    ...prayer,
+    notification: prefs[prayer.key]?.notification ?? prayer.notification,
+    vibration: prefs[prayer.key]?.vibration ?? prayer.vibration,
+    alarm: prefs[prayer.key]?.alarm ?? prayer.alarm,
+  }));
+}
+
+function getTodayFromCache(cache: CachedPrayerDay[]) {
+  const today = getLocalDateKey();
+  return cache.find((item) => item.date === today);
+}
+
+function removeExpiredSnoozes(snoozes: SnoozeMap) {
+  const now = Date.now();
+  return Object.fromEntries(Object.entries(snoozes).filter(([, value]) => value > now));
+}
+
+async function loadStoredState(): Promise<Partial<StoredAppState> | null> {
+  try {
+    const raw = await AsyncStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function saveStoredState(state: Partial<StoredAppState>) {
+  try {
+    const oldRaw = await AsyncStorage.getItem(STORAGE_KEY);
+    const oldState = oldRaw ? JSON.parse(oldRaw) : {};
+
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        ...oldState,
+        ...state,
+      })
+    );
+  } catch {
+    // storage hatası uygulamayı düşürmesin
+  }
 }
 
 export default function App() {
@@ -338,6 +442,7 @@ export default function App() {
     NotoSerif_600SemiBold,
   });
 
+  const [hydrated, setHydrated] = useState(false);
   const [screen, setScreen] = useState<Screen>('home');
   const [language, setLanguage] = useState<Language>(() => detectDeviceLanguage());
   const [deviceScheme, setDeviceScheme] = useState<ThemeMode>(
@@ -345,10 +450,12 @@ export default function App() {
   );
   const [themePreference, setThemePreference] = useState<ThemePreference>('system');
   const [timeFormat, setTimeFormat] = useState<TimeFormat>('system');
+  const [isOnline, setIsOnline] = useState<boolean | null>(null);
 
   const [clock, setClock] = useState(formatClock());
   const [coords, setCoords] = useState<{ latitude: number; longitude: number } | null>(null);
   const [prayers, setPrayers] = useState<PrayerTime[]>(fallbackPrayers);
+  const [cachedPrayerDays, setCachedPrayerDays] = useState<CachedPrayerDay[]>([]);
   const [loadingLocation, setLoadingLocation] = useState(false);
 
   const [muteAll, setMuteAll] = useState(false);
@@ -362,6 +469,7 @@ export default function App() {
   const alarmIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const alarmPlayerRef = useRef<any>(null);
   const hasRequestedLocationRef = useRef(false);
+  const scheduledPrayerIdsRef = useRef<string[]>([]);
 
   const themeMode: ThemeMode = themePreference === 'system' ? deviceScheme : themePreference;
   const t = DICTS[language];
@@ -369,6 +477,18 @@ export default function App() {
   const appColors = themes[themeMode];
   const appShadow = useMemo(() => createShadow(appColors), [appColors]);
   const styles = useMemo(() => createAppStyles(appColors, appShadow), [appColors, appShadow]);
+
+  useEffect(() => {
+    const unsub = NetInfo.addEventListener((state) => {
+      setIsOnline(Boolean(state.isConnected && state.isInternetReachable !== false));
+    });
+
+    NetInfo.fetch().then((state) => {
+      setIsOnline(Boolean(state.isConnected && state.isInternetReachable !== false));
+    });
+
+    return () => unsub();
+  }, []);
 
   useEffect(() => {
     const sub = Appearance.addChangeListener(({ colorScheme }) => {
@@ -388,27 +508,114 @@ export default function App() {
       playsInSilentMode: true,
       shouldPlayInBackground: true,
       interruptionMode: 'doNotMix',
-    } as any).catch(console.error);
+    } as any).catch(() => {});
 
-    alarmPlayerRef.current = createAudioPlayer(require('./assets/alarm.mp3'));
+    try {
+      alarmPlayerRef.current = createAudioPlayer(require('./assets/alarm.mp3'));
+    } catch {
+      alarmPlayerRef.current = null;
+    }
 
     return () => {
       try {
         alarmPlayerRef.current?.release?.();
-      } catch (err) {
-        console.error(err);
-      }
+      } catch {}
 
       alarmPlayerRef.current = null;
     };
   }, []);
 
   useEffect(() => {
-    if (locationEnabled && !hasRequestedLocationRef.current) {
+    loadStoredState().then((stored) => {
+      if (!stored) {
+        setHydrated(true);
+        return;
+      }
+
+      const nextLanguage = stored.language ?? detectDeviceLanguage();
+      const nextTheme = stored.themePreference ?? 'system';
+      const nextTimeFormat = stored.timeFormat ?? 'system';
+      const nextMuteAll = stored.muteAll ?? false;
+      const nextDisableVibration = stored.disableVibration ?? false;
+      const nextDisableAlarm = stored.disableAlarm ?? false;
+      const nextLocationEnabled = stored.locationEnabled ?? true;
+      const nextCoords = stored.coords ?? null;
+      const nextCache = stored.cachedPrayerDays ?? [];
+      const nextPrefs = stored.prayerPrefs ?? getPrayerPrefs(fallbackPrayers);
+      const nextSnoozes = removeExpiredSnoozes(stored.snoozedUntilByKey ?? {});
+
+      setLanguage(nextLanguage);
+      setThemePreference(nextTheme);
+      setTimeFormat(nextTimeFormat);
+      setMuteAll(nextMuteAll);
+      setDisableVibration(nextDisableVibration);
+      setDisableAlarm(nextDisableAlarm);
+      setLocationEnabled(nextLocationEnabled);
+      setCoords(nextCoords);
+      setCachedPrayerDays(nextCache);
+      setSnoozedUntilByKey(nextSnoozes);
+
+      scheduledPrayerIdsRef.current = stored.scheduledPrayerNotificationIds ?? [];
+
+      const today = getTodayFromCache(nextCache);
+
+      if (today) {
+        setPrayers(applyPrayerPrefs(today.prayers, nextPrefs));
+      } else {
+        setPrayers(applyPrayerPrefs(fallbackPrayers, nextPrefs));
+      }
+
+      setHydrated(true);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+
+    saveStoredState({
+      language,
+      themePreference,
+      timeFormat,
+      muteAll,
+      disableVibration,
+      disableAlarm,
+      locationEnabled,
+      coords,
+      prayerPrefs: getPrayerPrefs(prayers),
+      snoozedUntilByKey,
+      cachedPrayerDays,
+      scheduledPrayerNotificationIds: scheduledPrayerIdsRef.current,
+    });
+  }, [
+    hydrated,
+    language,
+    themePreference,
+    timeFormat,
+    muteAll,
+    disableVibration,
+    disableAlarm,
+    locationEnabled,
+    coords,
+    prayers,
+    snoozedUntilByKey,
+    cachedPrayerDays,
+  ]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+
+    const today = getTodayFromCache(cachedPrayerDays);
+    if (!today) return;
+
+    setPrayers((prev) => applyPrayerPrefs(today.prayers, getPrayerPrefs(prev)));
+  }, [hydrated, clock, cachedPrayerDays]);
+
+  useEffect(() => {
+    if (hydrated && locationEnabled && !hasRequestedLocationRef.current) {
       hasRequestedLocationRef.current = true;
       requestLocationAndSync(true);
     }
-  }, [locationEnabled]);
+  }, [hydrated, locationEnabled]);
 
   useEffect(() => {
     if (Platform.OS === 'android') {
@@ -425,7 +632,6 @@ export default function App() {
   useEffect(() => {
     const receivedSub = Notifications.addNotificationReceivedListener((notification) => {
       const prayerKey = notification.request.content.data?.prayerKey;
-
       if (typeof prayerKey !== 'string') return;
 
       const prayer = prayers.find((item) => item.key === prayerKey);
@@ -434,7 +640,6 @@ export default function App() {
 
     const responseSub = Notifications.addNotificationResponseReceivedListener((response) => {
       const prayerKey = response.notification.request.content.data?.prayerKey;
-
       if (typeof prayerKey !== 'string') return;
 
       const prayer = prayers.find((item) => item.key === prayerKey);
@@ -480,9 +685,7 @@ export default function App() {
     try {
       alarmPlayerRef.current?.seekTo?.(0);
       alarmPlayerRef.current?.play?.();
-    } catch (err) {
-      console.error(err);
-    }
+    } catch {}
 
     if (!disableVibration && prayer.vibration) {
       Vibration.vibrate([0, 900, 500, 900], true);
@@ -503,9 +706,7 @@ export default function App() {
     try {
       alarmPlayerRef.current?.pause?.();
       alarmPlayerRef.current?.seekTo?.(0);
-    } catch (err) {
-      console.error(err);
-    }
+    } catch {}
 
     if (alarmIntervalRef.current) {
       clearInterval(alarmIntervalRef.current);
@@ -546,11 +747,33 @@ export default function App() {
     });
   }
 
+  async function cancelPrayerNotifications() {
+    for (const id of scheduledPrayerIdsRef.current) {
+      try {
+        await Notifications.cancelScheduledNotificationAsync(id);
+      } catch {}
+    }
+
+    scheduledPrayerIdsRef.current = [];
+  }
+
   async function requestLocationAndSync(force = false) {
     if (!force && !locationEnabled) return;
 
     try {
       setLoadingLocation(true);
+
+      const today = getTodayFromCache(cachedPrayerDays);
+
+      if (isOnline === false) {
+        if (today) {
+          const cachedPrayers = applyPrayerPrefs(today.prayers, getPrayerPrefs(prayers));
+          setPrayers(cachedPrayers);
+          await scheduleLocalPrayerNotifications(cachedPrayers);
+        }
+
+        return;
+      }
 
       const perm = await Location.requestForegroundPermissionsAsync();
 
@@ -573,12 +796,27 @@ export default function App() {
 
       setCoords(nextCoords);
 
-      const times = await fetchPrayerTimes(nextCoords.latitude, nextCoords.longitude);
-      setPrayers(times);
+      const cache = await fetchMonthlyPrayerCalendar(nextCoords.latitude, nextCoords.longitude);
+      setCachedPrayerDays(cache);
 
-      await scheduleLocalPrayerNotifications(times);
-    } catch (err) {
-      console.error(err);
+      const todayFromNewCache = getTodayFromCache(cache);
+      const prefs = getPrayerPrefs(prayers);
+
+      if (todayFromNewCache) {
+        const todayPrayers = applyPrayerPrefs(todayFromNewCache.prayers, prefs);
+        setPrayers(todayPrayers);
+        await scheduleLocalPrayerNotifications(todayPrayers);
+      }
+    } catch {
+      const today = getTodayFromCache(cachedPrayerDays);
+
+      if (today) {
+        const cachedPrayers = applyPrayerPrefs(today.prayers, getPrayerPrefs(prayers));
+        setPrayers(cachedPrayers);
+        await scheduleLocalPrayerNotifications(cachedPrayers);
+        return;
+      }
+
       Alert.alert(t.syncErrorTitle, t.syncErrorBody);
     } finally {
       setLoadingLocation(false);
@@ -598,7 +836,7 @@ export default function App() {
 
     if (status !== 'granted') return;
 
-    await Notifications.cancelAllScheduledNotificationsAsync();
+    await cancelPrayerNotifications();
 
     const muted = options?.muteAll ?? muteAll;
     const vibrationDisabled = options?.disableVibration ?? disableVibration;
@@ -609,6 +847,7 @@ export default function App() {
     if (muted) return;
 
     const now = new Date();
+    const nextIds: string[] = [];
 
     for (const prayer of times) {
       const shouldNotify = prayer.notification;
@@ -625,7 +864,7 @@ export default function App() {
         triggerDate.setDate(triggerDate.getDate() + 1);
       }
 
-      await Notifications.scheduleNotificationAsync({
+      const id = await Notifications.scheduleNotificationAsync({
         content: {
           title: shouldAlarm
             ? `${getPrayerLabel(prayer.key, activeLanguage)} ${activeDict.alarmNotificationTitle}`
@@ -642,7 +881,15 @@ export default function App() {
           ...(Platform.OS === 'android' ? { channelId: 'default' } : {}),
         },
       });
+
+      nextIds.push(id);
     }
+
+    scheduledPrayerIdsRef.current = nextIds;
+
+    saveStoredState({
+      scheduledPrayerNotificationIds: nextIds,
+    }).catch(() => {});
   }
 
   function togglePrayerSetting(key: string, field: PrayerToggleField) {
@@ -661,7 +908,7 @@ export default function App() {
         Vibration.vibrate(80);
       }
 
-      scheduleLocalPrayerNotifications(next).catch(console.error);
+      scheduleLocalPrayerNotifications(next).catch(() => {});
 
       return next;
     });
@@ -672,7 +919,7 @@ export default function App() {
 
     if (value) stopAlarm();
 
-    scheduleLocalPrayerNotifications(prayers, { muteAll: value }).catch(console.error);
+    scheduleLocalPrayerNotifications(prayers, { muteAll: value }).catch(() => {});
   }
 
   function handleDisableVibration(value: boolean) {
@@ -684,7 +931,7 @@ export default function App() {
       Vibration.vibrate(80);
     }
 
-    scheduleLocalPrayerNotifications(prayers, { disableVibration: value }).catch(console.error);
+    scheduleLocalPrayerNotifications(prayers, { disableVibration: value }).catch(() => {});
   }
 
   function handleDisableAlarm(value: boolean) {
@@ -692,7 +939,7 @@ export default function App() {
 
     if (value) stopAlarm();
 
-    scheduleLocalPrayerNotifications(prayers, { disableAlarm: value }).catch(console.error);
+    scheduleLocalPrayerNotifications(prayers, { disableAlarm: value }).catch(() => {});
   }
 
   function handleLocationEnabled(value: boolean) {
@@ -708,10 +955,10 @@ export default function App() {
 
   function handleLanguageChange(nextLanguage: Language) {
     setLanguage(nextLanguage);
-    scheduleLocalPrayerNotifications(prayers, { language: nextLanguage }).catch(console.error);
+    scheduleLocalPrayerNotifications(prayers, { language: nextLanguage }).catch(() => {});
   }
 
-  if (!fontsLoaded) {
+  if (!fontsLoaded || !hydrated) {
     return (
       <SafeAreaProvider>
         <View style={styles.loader}>
@@ -760,6 +1007,7 @@ export default function App() {
             deviceScheme={deviceScheme}
             themePreference={themePreference}
             timeFormat={timeFormat}
+            isOnline={isOnline}
             muteAll={muteAll}
             disableVibration={disableVibration}
             disableAlarm={disableAlarm}
@@ -1014,6 +1262,7 @@ function AboutScreen({
   deviceScheme,
   themePreference,
   timeFormat,
+  isOnline,
   muteAll,
   disableVibration,
   disableAlarm,
@@ -1035,6 +1284,7 @@ function AboutScreen({
   deviceScheme: ThemeMode;
   themePreference: ThemePreference;
   timeFormat: TimeFormat;
+  isOnline: boolean | null;
   muteAll: boolean;
   disableVibration: boolean;
   disableAlarm: boolean;
@@ -1092,6 +1342,16 @@ function AboutScreen({
           </Text>
 
           <Text style={styles.sectionTitle}>{t.systemSettings}</Text>
+
+          <StatusRow
+            icon={isOnline ? 'wifi' : 'wifi-off'}
+            label={t.internetStatus}
+            value={isOnline ? t.internetOnline : t.internetOffline}
+            colors={colors}
+            styles={styles}
+          />
+
+          {isOnline === false && <Text style={styles.offlineText}>{t.offlineMode}</Text>}
 
           <SettingRow
             icon="bell-off-outline"
@@ -1192,34 +1452,10 @@ function AboutScreen({
           <Text style={styles.sectionTitle}>{t.contactIntro}</Text>
 
           <View style={styles.linkRow}>
-            <LinkButton
-              icon="email-outline"
-              label="hattab1342@gmail.com"
-              url="mailto:hattab1342@gmail.com"
-              colors={colors}
-              styles={styles}
-            />
-            <LinkButton
-              icon="web"
-              label="hattab.vercel.app"
-              url="https://hattab.vercel.app"
-              colors={colors}
-              styles={styles}
-            />
-            <LinkButton
-              icon="github"
-              label="github / trs-1342"
-              url="https://github.com/trs-1342"
-              colors={colors}
-              styles={styles}
-            />
-            <LinkButton
-              icon="linkedin"
-              label="linkedin / halilhattabh"
-              url="https://linkedin.com/in/halilhattabh"
-              colors={colors}
-              styles={styles}
-            />
+            <LinkButton icon="email-outline" label="hattab1342@gmail.com" url="mailto:hattab1342@gmail.com" colors={colors} styles={styles} />
+            <LinkButton icon="web" label="hattab.vercel.app" url="https://hattab.vercel.app" colors={colors} styles={styles} />
+            <LinkButton icon="github" label="github / trs-1342" url="https://github.com/trs-1342" colors={colors} styles={styles} />
+            <LinkButton icon="linkedin" label="linkedin / halilhattabh" url="https://linkedin.com/in/halilhattabh" colors={colors} styles={styles} />
           </View>
         </Panel>
       </ScrollView>
@@ -1267,7 +1503,6 @@ function AlarmOverlay({
             translateX.setValue(0);
             onSnooze();
           });
-
           return;
         }
 
@@ -1286,7 +1521,10 @@ function AlarmOverlay({
       <View style={styles.alarmCard}>
         <MaterialCommunityIcons name="alarm-light-outline" size={64} color={colors.primary} />
 
-        <Text style={styles.alarmTitle}>{label} {t.alarmNotificationTitle}</Text>
+        <Text style={styles.alarmTitle}>
+          {label} {t.alarmNotificationTitle}
+        </Text>
+
         <Text style={styles.alarmSubtitle}>{upper(t.alarmActive, language)}</Text>
         <Text style={styles.alarmTime}>{formatTimeValue(prayer.time, language, timeFormat)}</Text>
 
@@ -1328,11 +1566,7 @@ function Panel({
   styles: ReturnType<typeof createAppStyles>;
   shadow: ReturnType<typeof createShadow>;
 }) {
-  return (
-    <View style={[styles.panel, active && styles.panelActive, style]}>
-      {children}
-    </View>
-  );
+  return <View style={[styles.panel, active && styles.panelActive, style]}>{children}</View>;
 }
 
 function PrayerRow({
@@ -1415,6 +1649,30 @@ function PrayerRow({
           </Pressable>
         </View>
       </View>
+    </View>
+  );
+}
+
+function StatusRow({
+  icon,
+  label,
+  value,
+  colors,
+  styles,
+}: {
+  icon: keyof typeof MaterialCommunityIcons.glyphMap;
+  label: string;
+  value: string;
+  colors: AppColors;
+  styles: ReturnType<typeof createAppStyles>;
+}) {
+  return (
+    <View style={styles.settingRow}>
+      <View style={styles.settingLabelWrap}>
+        <MaterialCommunityIcons name={icon} size={19} color={colors.onSurfaceVariant} />
+        <Text style={styles.settingLabel}>{label}</Text>
+      </View>
+      <Text style={styles.statusValue}>{value}</Text>
     </View>
   );
 }
