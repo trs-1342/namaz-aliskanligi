@@ -15,6 +15,13 @@ Expo Go uygulamasını indir, sonra terminalden çıkan QR kodu okut. Expo Go uy
 
 ---
 
+# APK Dosyası
+
+indir:<br>
+[version 1.0.4](https://github.com/trs-1342/namaz-aliskanligi/releases/tag/v1.0.4)
+
+---
+
 ### İletişim ve Geri Bildirim
 
 Email: hattab1342@gmail.com<br>
