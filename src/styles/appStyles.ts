@@ -1,5 +1,5 @@
 import { Platform, StyleSheet } from 'react-native';
-import { AppColors, createShadow, font, spacing } from '../theme';
+import { AppColors, createShadow, font } from '../theme';
 
 export function createAppStyles(
   colors: AppColors,
@@ -174,16 +174,6 @@ export function createAppStyles(
       overflow: 'hidden',
     },
 
-    progressTrack: {
-      width: 168,
-      height: 3,
-      borderRadius: 2,
-      backgroundColor: 'rgba(226,226,226,0.15)',
-      marginTop: 12,
-      marginBottom: 10,
-      overflow: 'hidden',
-    },
-
     progressFill: {
       height: '100%',
       backgroundColor: colors.primaryContainer,
@@ -196,14 +186,6 @@ export function createAppStyles(
       lineHeight: 22,
       textAlign: 'center',
       marginBottom: 8,
-    },
-
-    heroPrayerName: {
-      fontFamily: font.serif,
-      color: colors.primary,
-      fontSize: 24,
-      lineHeight: 31,
-      marginTop: 2,
     },
 
     heroPrayerName: {
@@ -227,7 +209,7 @@ export function createAppStyles(
     },
 
     prayerRow: {
-      minHeight: 56,
+      minHeight: 58,
       paddingHorizontal: 18,
       borderBottomWidth: 1,
       borderBottomColor: 'rgba(154,143,128,0.11)',
@@ -273,12 +255,20 @@ export function createAppStyles(
       fontSize: 25,
       letterSpacing: -0.6,
       minWidth: 62,
-      textAlign: 'right',
+      textAlign: 'left',
     },
 
     activeTime: {
       color: colors.primary,
       fontFamily: font.inter,
+    },
+
+    snoozeText: {
+      fontFamily: font.interMedium,
+      color: colors.primary,
+      fontSize: 11,
+      marginTop: 4,
+      opacity: 0.85,
     },
 
     aboutCard: {
@@ -430,7 +420,7 @@ export function createAppStyles(
       fontFamily: font.interSemi,
       color: colors.primary,
       fontSize: 12,
-      letterSpacing: 1.4,
+      letterSpacing: 1.1,
     },
 
     alarmOverlay: {
@@ -480,6 +470,37 @@ export function createAppStyles(
       width: '100%',
       gap: 12,
       marginTop: 8,
+    },
+
+    snoozeSlider: {
+      width: '100%',
+      height: 54,
+      borderRadius: 4,
+      borderWidth: 1,
+      borderColor: colors.primaryContainer,
+      backgroundColor: 'rgba(197,160,89,0.08)',
+      justifyContent: 'center',
+      overflow: 'hidden',
+      position: 'relative',
+    },
+
+    snoozeSliderText: {
+      fontFamily: font.interSemi,
+      color: colors.primary,
+      fontSize: 12,
+      letterSpacing: 1.5,
+      textAlign: 'center',
+    },
+
+    snoozeThumb: {
+      position: 'absolute',
+      left: 4,
+      width: 46,
+      height: 46,
+      borderRadius: 4,
+      backgroundColor: colors.primaryContainer,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
 
     alarmMainButton: {

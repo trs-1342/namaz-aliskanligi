@@ -5,7 +5,13 @@
     "version": "1.0.4",
     "orientation": "portrait",
     "scheme": "namaz-aliskanligi",
-    "userInterfaceStyle": "dark",
+    "userInterfaceStyle": "automatic",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#121414"
+    },
     "android": {
       "package": "com.trs1342.namazaliskanligi",
       "permissions": [
@@ -13,11 +19,16 @@
         "ACCESS_FINE_LOCATION",
         "POST_NOTIFICATIONS",
         "VIBRATE"
-      ]
+      ],
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#121414"
+      }
     },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.trs1342.namazaliskanligi",
+      "icon": "./assets/icon.png",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Namaz vakitlerini konumunuza göre hesaplamak için konum izni gereklidir."
       }
@@ -35,7 +46,8 @@
           "defaultChannel": "default"
         }
       ],
-      "expo-asset"
+      "expo-asset",
+      "expo-audio"
     ],
     "newArchEnabled": true
   }

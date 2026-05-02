@@ -2,8 +2,10 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   Appearance,
   Linking,
+  PanResponder,
   Platform,
   Pressable,
   ScrollView,
@@ -18,6 +20,7 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
+import { createAudioPlayer, setAudioModeAsync } from 'expo-audio';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
   Inter_300Light,
@@ -39,6 +42,8 @@ import { formatClock, getCurrentPrayer, getNextPrayer } from './src/utils/time';
 type Screen = 'home' | 'about';
 type Language = 'tr' | 'en' | 'ar';
 type ThemePreference = 'system' | ThemeMode;
+type TimeFormat = 'system' | '24' | '12';
+type SnoozeMap = Record<string, number>;
 type PrayerToggleField = 'notification' | 'vibration' | 'alarm';
 
 type PrayerProgress = {
@@ -74,16 +79,21 @@ const DICTS = {
     themeSystem: 'Sistem',
     themeDark: 'Karanlık',
     themeLight: 'Aydınlık',
+    timeFormat: 'Saat Sistemi',
+    timeFormatSystem: 'Sistem',
+    timeFormat24: '24 Saat',
+    timeFormat12: '12 Saat',
     architecture: 'Sistem Mimarisi',
     developer: 'Geliştirici',
     developerName: 'trs-1342',
     contactIntro: 'İletişim ve geri bildirim için:',
-    email: 'E-posta',
     alarmActive: 'Alarm Aktif',
     alarmNotificationTitle: 'alarmı',
     alarmNotificationBody: 'Namaz vakti alarmı aktif',
     prayerNotificationBody: 'Namaz vakti bildirimi',
     snooze: '5 dk ertele',
+    swipeToSnooze: 'Ertelemek için kaydır',
+    snoozedUntil: 'Ertelendi',
     stop: 'Sustur',
     permissionDeniedTitle: 'Konum izni reddedildi',
     permissionDeniedBody: 'Namaz vakitleri için konum izni gerekiyor.',
@@ -124,16 +134,21 @@ const DICTS = {
     themeSystem: 'System',
     themeDark: 'Dark',
     themeLight: 'Light',
+    timeFormat: 'Time Format',
+    timeFormatSystem: 'System',
+    timeFormat24: '24 Hour',
+    timeFormat12: '12 Hour',
     architecture: 'System Architecture',
     developer: 'Developer',
     developerName: 'trs-1342',
     contactIntro: 'For contact and feedback:',
-    email: 'Email',
     alarmActive: 'Alarm Active',
     alarmNotificationTitle: 'alarm',
     alarmNotificationBody: 'Prayer time alarm is active',
     prayerNotificationBody: 'Prayer time reminder',
     snooze: 'Snooze 5 min',
+    swipeToSnooze: 'Swipe to snooze',
+    snoozedUntil: 'Snoozed',
     stop: 'Stop',
     permissionDeniedTitle: 'Location permission denied',
     permissionDeniedBody: 'Location permission is required for prayer times.',
@@ -174,16 +189,21 @@ const DICTS = {
     themeSystem: 'النظام',
     themeDark: 'داكن',
     themeLight: 'فاتح',
+    timeFormat: 'نظام الوقت',
+    timeFormatSystem: 'النظام',
+    timeFormat24: '٢٤ ساعة',
+    timeFormat12: '١٢ ساعة',
     architecture: 'بنية النظام',
     developer: 'المطور',
     developerName: 'trs-1342',
     contactIntro: 'للتواصل وإرسال الملاحظات:',
-    email: 'البريد الإلكتروني',
     alarmActive: 'المنبه نشط',
     alarmNotificationTitle: 'منبه',
     alarmNotificationBody: 'منبه وقت الصلاة نشط',
     prayerNotificationBody: 'تذكير وقت الصلاة',
-    snooze: 'تأجيل 5 دقائق',
+    snooze: 'تأجيل ٥ دقائق',
+    swipeToSnooze: 'اسحب للتأجيل',
+    snoozedUntil: 'تم التأجيل',
     stop: 'إيقاف',
     permissionDeniedTitle: 'تم رفض إذن الموقع',
     permissionDeniedBody: 'يلزم إذن الموقع لحساب أوقات الصلاة.',
@@ -254,6 +274,60 @@ function formatForLanguage(value: string | undefined, language: Language) {
   return language === 'ar' ? toArabicDigits(value) : value;
 }
 
+function resolveTimeFormat(format: TimeFormat) {
+  if (format === '12') return '12';
+  if (format === '24') return '24';
+
+  const locale = Intl.DateTimeFormat().resolvedOptions().locale;
+  const hourCycle = new Intl.DateTimeFormat(locale, { hour: 'numeric' }).resolvedOptions().hourCycle;
+
+  return hourCycle === 'h11' || hourCycle === 'h12' ? '12' : '24';
+}
+
+function formatTimeValue(value: string | undefined, language: Language, format: TimeFormat) {
+  if (!value) return '--:--';
+
+  const mode = resolveTimeFormat(format);
+  const [hourRaw, minuteRaw] = value.split(':').map(Number);
+
+  if (Number.isNaN(hourRaw) || Number.isNaN(minuteRaw)) {
+    return formatForLanguage(value, language);
+  }
+
+  if (mode === '24') {
+    return formatForLanguage(`${String(hourRaw).padStart(2, '0')}:${String(minuteRaw).padStart(2, '0')}`, language);
+  }
+
+  const period =
+    hourRaw >= 12
+      ? language === 'tr'
+        ? 'ÖS'
+        : language === 'ar'
+          ? 'م'
+          : 'PM'
+      : language === 'tr'
+        ? 'ÖÖ'
+        : language === 'ar'
+          ? 'ص'
+          : 'AM';
+
+  const hour12 = hourRaw % 12 || 12;
+  const result = `${hour12}:${String(minuteRaw).padStart(2, '0')} ${period}`;
+
+  return formatForLanguage(result, language);
+}
+
+function formatDurationValue(value: string | undefined, language: Language) {
+  return formatForLanguage(value ?? '--:--:--', language);
+}
+
+function formatSnoozeUntil(timestamp: number, language: Language, format: TimeFormat) {
+  const date = new Date(timestamp);
+  const value = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+
+  return formatTimeValue(value, language, format);
+}
+
 export default function App() {
   const [fontsLoaded] = useFonts({
     Inter_300Light,
@@ -270,6 +344,7 @@ export default function App() {
     Appearance.getColorScheme() === 'light' ? 'light' : 'dark'
   );
   const [themePreference, setThemePreference] = useState<ThemePreference>('system');
+  const [timeFormat, setTimeFormat] = useState<TimeFormat>('system');
 
   const [clock, setClock] = useState(formatClock());
   const [coords, setCoords] = useState<{ latitude: number; longitude: number } | null>(null);
@@ -280,10 +355,12 @@ export default function App() {
   const [disableVibration, setDisableVibration] = useState(false);
   const [disableAlarm, setDisableAlarm] = useState(false);
   const [locationEnabled, setLocationEnabled] = useState(true);
+  const [snoozedUntilByKey, setSnoozedUntilByKey] = useState<SnoozeMap>({});
 
   const [activeAlarm, setActiveAlarm] = useState<PrayerTime | null>(null);
 
   const alarmIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const alarmPlayerRef = useRef<any>(null);
   const hasRequestedLocationRef = useRef(false);
 
   const themeMode: ThemeMode = themePreference === 'system' ? deviceScheme : themePreference;
@@ -304,6 +381,26 @@ export default function App() {
   useEffect(() => {
     const id = setInterval(() => setClock(formatClock()), 1000);
     return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    setAudioModeAsync({
+      playsInSilentMode: true,
+      shouldPlayInBackground: true,
+      interruptionMode: 'doNotMix',
+    } as any).catch(console.error);
+
+    alarmPlayerRef.current = createAudioPlayer(require('./assets/alarm.mp3'));
+
+    return () => {
+      try {
+        alarmPlayerRef.current?.release?.();
+      } catch (err) {
+        console.error(err);
+      }
+
+      alarmPlayerRef.current = null;
+    };
   }, []);
 
   useEffect(() => {
@@ -372,7 +469,20 @@ export default function App() {
   }
 
   function startAlarm(prayer: PrayerTime) {
+    setSnoozedUntilByKey((prev) => {
+      const next = { ...prev };
+      delete next[prayer.key];
+      return next;
+    });
+
     setActiveAlarm(prayer);
+
+    try {
+      alarmPlayerRef.current?.seekTo?.(0);
+      alarmPlayerRef.current?.play?.();
+    } catch (err) {
+      console.error(err);
+    }
 
     if (!disableVibration && prayer.vibration) {
       Vibration.vibrate([0, 900, 500, 900], true);
@@ -390,6 +500,13 @@ export default function App() {
   function stopAlarm() {
     Vibration.cancel();
 
+    try {
+      alarmPlayerRef.current?.pause?.();
+      alarmPlayerRef.current?.seekTo?.(0);
+    } catch (err) {
+      console.error(err);
+    }
+
     if (alarmIntervalRef.current) {
       clearInterval(alarmIntervalRef.current);
       alarmIntervalRef.current = null;
@@ -402,6 +519,13 @@ export default function App() {
     if (!activeAlarm) return;
 
     const prayer = activeAlarm;
+    const snoozeUntil = Date.now() + 5 * 60 * 1000;
+
+    setSnoozedUntilByKey((prev) => ({
+      ...prev,
+      [prayer.key]: snoozeUntil,
+    }));
+
     stopAlarm();
 
     await Notifications.scheduleNotificationAsync({
@@ -409,11 +533,14 @@ export default function App() {
         title: `${getPrayerLabel(prayer.key, language)} ${t.alarmNotificationTitle}`,
         body: t.alarmNotificationBody,
         sound: true,
-        data: { prayerKey: prayer.key },
+        data: {
+          prayerKey: prayer.key,
+          snoozed: true,
+        },
       },
       trigger: {
         type: Notifications.SchedulableTriggerInputTypes.DATE,
-        date: new Date(Date.now() + 5 * 60 * 1000),
+        date: new Date(snoozeUntil),
         ...(Platform.OS === 'android' ? { channelId: 'default' } : {}),
       },
     });
@@ -604,6 +731,8 @@ export default function App() {
           <HomeScreen
             t={t}
             language={language}
+            timeFormat={timeFormat}
+            snoozedUntilByKey={snoozedUntilByKey}
             clock={clock}
             coords={coords}
             prayers={prayers}
@@ -630,6 +759,7 @@ export default function App() {
             language={language}
             deviceScheme={deviceScheme}
             themePreference={themePreference}
+            timeFormat={timeFormat}
             muteAll={muteAll}
             disableVibration={disableVibration}
             disableAlarm={disableAlarm}
@@ -644,6 +774,7 @@ export default function App() {
             onToggleLocation={handleLocationEnabled}
             onLanguageChange={handleLanguageChange}
             onThemePreferenceChange={setThemePreference}
+            onTimeFormatChange={setTimeFormat}
           />
         )}
 
@@ -651,6 +782,7 @@ export default function App() {
           <AlarmOverlay
             prayer={activeAlarm}
             language={language}
+            timeFormat={timeFormat}
             t={t}
             colors={appColors}
             styles={styles}
@@ -750,6 +882,8 @@ function TopBar({
 function HomeScreen(props: {
   t: typeof DICTS.tr;
   language: Language;
+  timeFormat: TimeFormat;
+  snoozedUntilByKey: SnoozeMap;
   clock: string;
   coords: { latitude: number; longitude: number } | null;
   prayers: PrayerTime[];
@@ -777,9 +911,9 @@ function HomeScreen(props: {
     ? getPrayerLabel(props.nextPrayer.prayer.key, props.language)
     : '—';
 
-  const clockText = formatForLanguage(props.clock.slice(0, 5), props.language);
-  const remainingText = formatForLanguage(props.nextPrayer?.remaining ?? '--:--:--', props.language);
-  const nextTime = formatForLanguage(props.nextPrayer?.prayer.time ?? '--:--', props.language);
+  const clockText = formatTimeValue(props.clock.slice(0, 5), props.language, props.timeFormat);
+  const remainingText = formatDurationValue(props.nextPrayer?.remaining, props.language);
+  const nextTime = formatTimeValue(props.nextPrayer?.prayer.time, props.language, props.timeFormat);
 
   return (
     <View style={props.styles.screen}>
@@ -854,6 +988,8 @@ function HomeScreen(props: {
               item={item}
               label={getPrayerLabel(item.key, props.language)}
               language={props.language}
+              timeFormat={props.timeFormat}
+              snoozedUntil={props.snoozedUntilByKey[item.key]}
               active={item.key === props.currentPrayerKey}
               last={index === props.prayers.length - 1}
               muteAll={props.muteAll}
@@ -877,6 +1013,7 @@ function AboutScreen({
   language,
   deviceScheme,
   themePreference,
+  timeFormat,
   muteAll,
   disableVibration,
   disableAlarm,
@@ -891,11 +1028,13 @@ function AboutScreen({
   onToggleLocation,
   onLanguageChange,
   onThemePreferenceChange,
+  onTimeFormatChange,
 }: {
   t: typeof DICTS.tr;
   language: Language;
   deviceScheme: ThemeMode;
   themePreference: ThemePreference;
+  timeFormat: TimeFormat;
   muteAll: boolean;
   disableVibration: boolean;
   disableAlarm: boolean;
@@ -910,6 +1049,7 @@ function AboutScreen({
   onToggleLocation: (value: boolean) => void;
   onLanguageChange: (language: Language) => void;
   onThemePreferenceChange: (theme: ThemePreference) => void;
+  onTimeFormatChange: (format: TimeFormat) => void;
 }) {
   const themeOptions = [
     {
@@ -918,6 +1058,12 @@ function AboutScreen({
     },
     { label: t.themeDark, value: 'dark' },
     { label: t.themeLight, value: 'light' },
+  ];
+
+  const timeFormatOptions = [
+    { label: t.timeFormatSystem, value: 'system' },
+    { label: t.timeFormat24, value: '24' },
+    { label: t.timeFormat12, value: '12' },
   ];
 
   return (
@@ -1002,6 +1148,15 @@ function AboutScreen({
             styles={styles}
             onSelect={(value) => onThemePreferenceChange(value as ThemePreference)}
           />
+
+          <ChoiceRow
+            title={t.timeFormat}
+            options={timeFormatOptions}
+            selected={timeFormat}
+            colors={colors}
+            styles={styles}
+            onSelect={(value) => onTimeFormatChange(value as TimeFormat)}
+          />
         </Panel>
 
         <Panel style={styles.aboutCard} styles={styles} shadow={shadow}>
@@ -1075,6 +1230,7 @@ function AboutScreen({
 function AlarmOverlay({
   prayer,
   language,
+  timeFormat,
   t,
   colors,
   styles,
@@ -1083,6 +1239,7 @@ function AlarmOverlay({
 }: {
   prayer: PrayerTime;
   language: Language;
+  timeFormat: TimeFormat;
   t: typeof DICTS.tr;
   colors: AppColors;
   styles: ReturnType<typeof createAppStyles>;
@@ -1090,6 +1247,37 @@ function AlarmOverlay({
   onSnooze: () => void;
 }) {
   const label = getPrayerLabel(prayer.key, language);
+  const translateX = useRef(new Animated.Value(0)).current;
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gesture) => Math.abs(gesture.dx) > 8,
+      onPanResponderMove: (_, gesture) => {
+        if (gesture.dx > 0) {
+          translateX.setValue(Math.min(gesture.dx, 190));
+        }
+      },
+      onPanResponderRelease: (_, gesture) => {
+        if (gesture.dx > 140) {
+          Animated.timing(translateX, {
+            toValue: 220,
+            duration: 140,
+            useNativeDriver: true,
+          }).start(() => {
+            translateX.setValue(0);
+            onSnooze();
+          });
+
+          return;
+        }
+
+        Animated.spring(translateX, {
+          toValue: 0,
+          useNativeDriver: true,
+        }).start();
+      },
+    })
+  ).current;
 
   return (
     <View style={styles.alarmOverlay}>
@@ -1100,12 +1288,24 @@ function AlarmOverlay({
 
         <Text style={styles.alarmTitle}>{label} {t.alarmNotificationTitle}</Text>
         <Text style={styles.alarmSubtitle}>{upper(t.alarmActive, language)}</Text>
-        <Text style={styles.alarmTime}>{formatForLanguage(prayer.time, language)}</Text>
+        <Text style={styles.alarmTime}>{formatTimeValue(prayer.time, language, timeFormat)}</Text>
 
         <View style={styles.alarmActions}>
-          <Pressable style={styles.alarmSecondaryButton} onPress={onSnooze}>
-            <Text style={styles.alarmSecondaryText}>{upper(t.snooze, language)}</Text>
-          </Pressable>
+          <View style={styles.snoozeSlider}>
+            <Text style={styles.snoozeSliderText}>{upper(t.swipeToSnooze, language)}</Text>
+
+            <Animated.View
+              {...panResponder.panHandlers}
+              style={[
+                styles.snoozeThumb,
+                {
+                  transform: [{ translateX }],
+                },
+              ]}
+            >
+              <MaterialCommunityIcons name="chevron-right" size={28} color={colors.onPrimary} />
+            </Animated.View>
+          </View>
 
           <Pressable style={styles.alarmMainButton} onPress={onStop}>
             <Text style={styles.alarmMainText}>{upper(t.stop, language)}</Text>
@@ -1139,6 +1339,8 @@ function PrayerRow({
   item,
   label,
   language,
+  timeFormat,
+  snoozedUntil,
   active,
   last,
   muteAll,
@@ -1153,6 +1355,8 @@ function PrayerRow({
   item: PrayerTime;
   label: string;
   language: Language;
+  timeFormat: TimeFormat;
+  snoozedUntil?: number;
   active: boolean;
   last: boolean;
   muteAll: boolean;
@@ -1173,8 +1377,15 @@ function PrayerRow({
       <View>
         <Text style={[styles.prayerName, active && styles.activeText]}>{upper(label, language)}</Text>
         <Text style={[styles.prayerTime, active && styles.activeTime]}>
-          {formatForLanguage(item.time, language)}
+          {formatTimeValue(item.time, language, timeFormat)}
         </Text>
+
+        {snoozedUntil && snoozedUntil > Date.now() && (
+          <Text style={styles.snoozeText}>
+            {formatForLanguage('⏱ ', language)}
+            {formatSnoozeUntil(snoozedUntil, language, timeFormat)}
+          </Text>
+        )}
       </View>
 
       <View style={styles.prayerRight}>
