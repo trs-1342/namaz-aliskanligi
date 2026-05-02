@@ -1,0 +1,42 @@
+{
+  "expo": {
+    "name": "Namaz Alışkanlığı",
+    "slug": "namaz-aliskanligi",
+    "version": "1.0.4",
+    "orientation": "portrait",
+    "scheme": "namaz-aliskanligi",
+    "userInterfaceStyle": "dark",
+    "android": {
+      "package": "com.trs1342.namazaliskanligi",
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "POST_NOTIFICATIONS",
+        "VIBRATE"
+      ]
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.trs1342.namazaliskanligi",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Namaz vakitlerini konumunuza göre hesaplamak için konum izni gereklidir."
+      }
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Namaz vakitlerini konumunuza göre hesaplamak için konum izni gereklidir."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "defaultChannel": "default"
+        }
+      ],
+      "expo-asset"
+    ],
+    "newArchEnabled": true
+  }
+}
