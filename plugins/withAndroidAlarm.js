@@ -6,7 +6,7 @@
  * 3. ExpoNotificationBuilder.kt patch: alarm kanalı bildirimlerine fullScreenIntent ekle
  */
 
-const { withAndroidManifest, withDangerousMods } = require('@expo/config-plugins');
+const { withAndroidManifest, withDangerousMod } = require('@expo/config-plugins');
 const { mergeContents } = require('@expo/config-plugins/build/utils/generateCode');
 const fs = require('fs');
 const path = require('path');
@@ -37,7 +37,7 @@ function addManifestFlags(config) {
 // ─── 2. AlarmWindowModule native modülü ──────────────────────────────────────
 
 function addAlarmWindowModule(config) {
-  return withDangerousMods(config, [
+  return withDangerousMod(config, [
     'android',
     async (config) => {
       const { projectRoot } = config.modRequest;
@@ -87,7 +87,7 @@ function addAlarmWindowModule(config) {
           mainSrc = mergeContents({
             tag: 'withAndroidAlarm-pkg',
             src: mainSrc,
-            newSrc: '          packages.add(AlarmWindowPackage())',
+            newSrc: '          (packages as MutableList<ReactPackage>).add(AlarmWindowPackage())',
             anchor: /PackageList\([^)]+\)\.packages/,
             offset: 1,
             comment: '//',
@@ -107,7 +107,7 @@ function addAlarmWindowModule(config) {
 // ─── 3. ExpoNotificationBuilder.kt — fullScreenIntent patch ──────────────────
 
 function patchFullScreenIntent(config) {
-  return withDangerousMods(config, [
+  return withDangerousMod(config, [
     'android',
     async (config) => {
       const { projectRoot } = config.modRequest;
@@ -186,7 +186,7 @@ class AlarmWindowModule(context: ReactApplicationContext) :
 
   @ReactMethod
   fun setFlags(enable: Boolean) {
-    val activity = currentActivity ?: return
+    val activity = reactApplicationContext.currentActivity ?: return
     activity.runOnUiThread {
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
         activity.setShowWhenLocked(enable)
