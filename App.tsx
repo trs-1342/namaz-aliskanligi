@@ -5,6 +5,7 @@ import {
   Animated,
   Appearance,
   Linking,
+  NativeModules,
   PanResponder,
   Platform,
   Pressable,
@@ -271,12 +272,16 @@ const languageOptions = [
 ];
 
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
+  handleNotification: async (notification) => {
+    // Alarm bildirimlerini ön planda biz yönetiyoruz; OS banner'ı bastır
+    const isAlarm = notification.request.content.data?.isAlarm === true;
+    return {
+      shouldPlaySound: !isAlarm,
+      shouldSetBadge: false,
+      shouldShowBanner: !isAlarm,
+      shouldShowList: true,
+    };
+  },
 });
 
 const fallbackPrayers: PrayerTime[] = [
@@ -607,7 +612,13 @@ export default function App() {
     const today = getTodayFromCache(cachedPrayerDays);
     if (!today) return;
 
-    setPrayers((prev) => applyPrayerPrefs(today.prayers, getPrayerPrefs(prev)));
+    setPrayers((prev) => {
+      const next = applyPrayerPrefs(today.prayers, getPrayerPrefs(prev));
+      // Vaki saatleri değişmediyse (gün geçişi yoksa) aynı referansı döndür
+      // → her saniye gereksiz re-render engellenir
+      const unchanged = next.every((p, i) => prev[i]?.key === p.key && prev[i]?.time === p.time);
+      return unchanged ? prev : next;
+    });
   }, [hydrated, clock, cachedPrayerDays]);
 
   useEffect(() => {
@@ -617,40 +628,113 @@ export default function App() {
     }
   }, [hydrated, locationEnabled]);
 
+  // Hydration sonrası: activeAlarm'ı güncel prayer saatiyle senkronize et
+  // (cold-start'ta bildirimden önce fallback prayer zamanı set edilmiş olabilir)
   useEffect(() => {
-    if (Platform.OS === 'android') {
-      Notifications.setNotificationChannelAsync('default', {
-        name: 'Namaz Vakitleri',
-        importance: Notifications.AndroidImportance.MAX,
-        vibrationPattern: [0, 700, 350, 700],
-        lightColor: appColors.primaryContainer,
-        sound: 'default',
-      });
-    }
+    if (!hydrated) return;
+    setActiveAlarm((prev) => {
+      if (!prev) return prev;
+      const updated = prayers.find((p) => p.key === prev.key);
+      return updated && updated.time !== prev.time ? updated : prev;
+    });
+  }, [hydrated, prayers]);
+
+  // Hydration sonrası: fullScreenIntent cold-start güvenlik kontrolü
+  // addNotificationResponseReceivedListener'ı kaçırmış olabiliriz
+  useEffect(() => {
+    if (!hydrated) return;
+    Notifications.getLastNotificationResponseAsync().then((response) => {
+      if (!response) return;
+      // 60 saniyeden eski bildirimleri atla (önceki oturumdan kalan)
+      if (Date.now() - response.notification.date.getTime() > 60_000) return;
+      const data = response.notification.request.content.data;
+      if (data?.isAlarm !== true) return;
+      const prayerKey = typeof data.prayerKey === 'string' ? data.prayerKey : null;
+      if (!prayerKey) return;
+      const prayer = prayers.find((p) => p.key === prayerKey);
+      if (prayer && !activeAlarm) handlePrayerTrigger(prayer);
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hydrated]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+
+    Notifications.setNotificationChannelAsync('default', {
+      name: 'Namaz Vakitleri',
+      importance: Notifications.AndroidImportance.HIGH,
+      vibrationPattern: [0, 700, 350, 700],
+      lightColor: appColors.primaryContainer,
+      sound: 'default',
+    });
+
+    Notifications.setNotificationChannelAsync('alarm', {
+      name: 'Namaz Alarmları',
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, 900, 500, 900],
+      lightColor: appColors.primaryContainer,
+      sound: 'alarm',
+    });
   }, [appColors.primaryContainer]);
 
   useEffect(() => {
-    const receivedSub = Notifications.addNotificationReceivedListener((notification) => {
-      const prayerKey = notification.request.content.data?.prayerKey;
-      if (typeof prayerKey !== 'string') return;
+    Notifications.setNotificationCategoryAsync('prayer_alarm', [
+      {
+        identifier: 'SNOOZE',
+        buttonTitle: t.snooze,
+        options: { opensAppToForeground: true },
+      },
+      {
+        identifier: 'STOP',
+        buttonTitle: t.stop,
+        options: { opensAppToForeground: false, isDestructive: true },
+      },
+    ]);
+  }, [language]);
 
-      const prayer = prayers.find((item) => item.key === prayerKey);
-      if (prayer) handlePrayerTrigger(prayer);
+  useEffect(() => {
+    // Ön planda: sadece alarm bildirimleri için in-app alarm başlat
+    const receivedSub = Notifications.addNotificationReceivedListener((notification) => {
+      const data = notification.request.content.data;
+      if (typeof data?.prayerKey !== 'string' || !data.isAlarm) return;
+      const prayer = prayers.find((item) => item.key === data.prayerKey);
+      if (prayer && !activeAlarm) handlePrayerTrigger(prayer);
     });
 
+    // Arka planda/kapalıyken bildirime dokunulduğunda veya aksiyon butonuna basıldığında
     const responseSub = Notifications.addNotificationResponseReceivedListener((response) => {
-      const prayerKey = response.notification.request.content.data?.prayerKey;
-      if (typeof prayerKey !== 'string') return;
+      const { actionIdentifier, notification } = response;
+      const data = notification.request.content.data;
+      const prayerKey = typeof data?.prayerKey === 'string' ? data.prayerKey : null;
 
-      const prayer = prayers.find((item) => item.key === prayerKey);
-      if (prayer) handlePrayerTrigger(prayer);
+      if (actionIdentifier === 'STOP') {
+        stopAlarm();
+        return;
+      }
+
+      if (actionIdentifier === 'SNOOZE') {
+        if (activeAlarm) {
+          snoozeAlarm();
+        } else if (prayerKey) {
+          const prayer = prayers.find((item) => item.key === prayerKey);
+          if (prayer) snoozeAlarmForPrayer(prayer);
+        }
+        return;
+      }
+
+      // Varsayılan: bildirime dokunuldu → sadece alarm bildirimi ise in-app alarm başlat
+      // Normal bildirimler (alarm=false) için uygulama sadece açılır, tetikleyici gerekmez
+      if (prayerKey && !activeAlarm && data?.isAlarm === true) {
+        const prayer = prayers.find((item) => item.key === prayerKey);
+        if (prayer) handlePrayerTrigger(prayer);
+      }
     });
 
     return () => {
       receivedSub.remove();
       responseSub.remove();
     };
-  }, [prayers, muteAll, disableVibration, disableAlarm]);
+  }, [prayers, muteAll, disableVibration, disableAlarm, activeAlarm, language]);
 
   useEffect(() => {
     return () => stopAlarm();
@@ -681,6 +765,11 @@ export default function App() {
     });
 
     setActiveAlarm(prayer);
+
+    // Kilitli ekranda göster, ekranı aç, uyku modunu engelle
+    if (Platform.OS === 'android') {
+      NativeModules.AlarmWindow?.setFlags(true);
+    }
 
     try {
       alarmPlayerRef.current?.seekTo?.(0);
@@ -713,13 +802,15 @@ export default function App() {
       alarmIntervalRef.current = null;
     }
 
+    // Ekran flag'lerini temizle
+    if (Platform.OS === 'android') {
+      NativeModules.AlarmWindow?.setFlags(false);
+    }
+
     setActiveAlarm(null);
   }
 
-  async function snoozeAlarm() {
-    if (!activeAlarm) return;
-
-    const prayer = activeAlarm;
+  async function snoozeAlarmForPrayer(prayer: PrayerTime) {
     const snoozeUntil = Date.now() + 5 * 60 * 1000;
 
     setSnoozedUntilByKey((prev) => ({
@@ -727,24 +818,30 @@ export default function App() {
       [prayer.key]: snoozeUntil,
     }));
 
-    stopAlarm();
-
     await Notifications.scheduleNotificationAsync({
       content: {
         title: `${getPrayerLabel(prayer.key, language)} ${t.alarmNotificationTitle}`,
         body: t.alarmNotificationBody,
         sound: true,
+        categoryIdentifier: 'prayer_alarm',
         data: {
           prayerKey: prayer.key,
-          snoozed: true,
+          isAlarm: true,
         },
       },
       trigger: {
         type: Notifications.SchedulableTriggerInputTypes.DATE,
         date: new Date(snoozeUntil),
-        ...(Platform.OS === 'android' ? { channelId: 'default' } : {}),
+        ...(Platform.OS === 'android' ? { channelId: 'alarm' } : {}),
       },
     });
+  }
+
+  async function snoozeAlarm() {
+    if (!activeAlarm) return;
+    const prayer = activeAlarm;
+    stopAlarm();
+    await snoozeAlarmForPrayer(prayer);
   }
 
   async function cancelPrayerNotifications() {
@@ -769,7 +866,7 @@ export default function App() {
         if (today) {
           const cachedPrayers = applyPrayerPrefs(today.prayers, getPrayerPrefs(prayers));
           setPrayers(cachedPrayers);
-          await scheduleLocalPrayerNotifications(cachedPrayers);
+          await scheduleLocalPrayerNotifications(cachedPrayers, undefined, cachedPrayerDays);
         }
 
         return;
@@ -805,7 +902,8 @@ export default function App() {
       if (todayFromNewCache) {
         const todayPrayers = applyPrayerPrefs(todayFromNewCache.prayers, prefs);
         setPrayers(todayPrayers);
-        await scheduleLocalPrayerNotifications(todayPrayers);
+        // Taze cache'i geç: state güncellemesi henüz sync değil
+        await scheduleLocalPrayerNotifications(todayPrayers, undefined, cache);
       }
     } catch {
       const today = getTodayFromCache(cachedPrayerDays);
@@ -813,7 +911,7 @@ export default function App() {
       if (today) {
         const cachedPrayers = applyPrayerPrefs(today.prayers, getPrayerPrefs(prayers));
         setPrayers(cachedPrayers);
-        await scheduleLocalPrayerNotifications(cachedPrayers);
+        await scheduleLocalPrayerNotifications(cachedPrayers, undefined, cachedPrayerDays);
         return;
       }
 
@@ -830,7 +928,8 @@ export default function App() {
       disableVibration?: boolean;
       disableAlarm?: boolean;
       language?: Language;
-    }
+    },
+    cacheDays?: CachedPrayerDay[]
   ) {
     const { status } = await Notifications.requestPermissionsAsync();
 
@@ -848,21 +947,43 @@ export default function App() {
 
     const now = new Date();
     const nextIds: string[] = [];
+    const prefs = getPrayerPrefs(times);
 
-    for (const prayer of times) {
+    // iOS'ta maks 64 bildirim planlanabiliyor, Android'de ~500
+    const maxDays = Platform.OS === 'ios' ? 10 : 30;
+    const daysToSchedule = (cacheDays ?? cachedPrayerDays).slice(0, maxDays);
+
+    type Entry = { triggerDate: Date; prayer: PrayerTime };
+    const toSchedule: Entry[] = [];
+
+    if (daysToSchedule.length > 0) {
+      // Önbellekten çoklu gün planla
+      for (const cachedDay of daysToSchedule) {
+        const dayPrayers = applyPrayerPrefs(cachedDay.prayers, prefs);
+        for (const prayer of dayPrayers) {
+          const [hour, minute] = prayer.time.split(':').map(Number);
+          const [yr, mo, dy] = cachedDay.date.split('-').map(Number);
+          const triggerDate = new Date(yr, mo - 1, dy, hour, minute, 0, 0);
+          if (triggerDate > now) toSchedule.push({ triggerDate, prayer });
+        }
+      }
+    } else {
+      // Önbellek yoksa sadece bir sonraki vakti planla
+      for (const prayer of times) {
+        const [hour, minute] = prayer.time.split(':').map(Number);
+        const triggerDate = new Date();
+        triggerDate.setHours(hour, minute, 0, 0);
+        if (triggerDate <= now) triggerDate.setDate(triggerDate.getDate() + 1);
+        toSchedule.push({ triggerDate, prayer });
+      }
+    }
+
+    for (const { triggerDate, prayer } of toSchedule) {
       const shouldNotify = prayer.notification;
       const shouldVibrate = prayer.vibration && !vibrationDisabled;
       const shouldAlarm = prayer.alarm && !alarmDisabled;
 
       if (!shouldNotify && !shouldVibrate && !shouldAlarm) continue;
-
-      const [hour, minute] = prayer.time.split(':').map(Number);
-      const triggerDate = new Date();
-      triggerDate.setHours(hour, minute, 0, 0);
-
-      if (triggerDate <= now) {
-        triggerDate.setDate(triggerDate.getDate() + 1);
-      }
 
       const id = await Notifications.scheduleNotificationAsync({
         content: {
@@ -873,12 +994,16 @@ export default function App() {
           sound: shouldAlarm || shouldNotify,
           data: {
             prayerKey: prayer.key,
+            isAlarm: shouldAlarm,
           },
+          ...(shouldAlarm ? { categoryIdentifier: 'prayer_alarm' } : {}),
         },
         trigger: {
           type: Notifications.SchedulableTriggerInputTypes.DATE,
           date: triggerDate,
-          ...(Platform.OS === 'android' ? { channelId: 'default' } : {}),
+          ...(Platform.OS === 'android'
+            ? { channelId: shouldAlarm ? 'alarm' : 'default' }
+            : {}),
         },
       });
 

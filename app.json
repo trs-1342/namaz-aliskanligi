@@ -2,7 +2,7 @@
   "expo": {
     "name": "Namaz Alışkanlığı",
     "slug": "namaz-aliskanligi",
-    "version": "1.0.4",
+    "version": "1.1.0",
     "orientation": "portrait",
     "scheme": "namaz-aliskanligi",
     "userInterfaceStyle": "automatic",
@@ -19,6 +19,7 @@
         "ACCESS_FINE_LOCATION",
         "POST_NOTIFICATIONS",
         "VIBRATE",
+        "USE_FULL_SCREEN_INTENT",
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.RECORD_AUDIO",
@@ -38,6 +39,7 @@
       }
     },
     "plugins": [
+      "./plugins/withAndroidAlarm",
       [
         "expo-location",
         {
@@ -47,6 +49,7 @@
       [
         "expo-notifications",
         {
+          "sounds": ["./assets/alarm.mp3"],
           "defaultChannel": "default"
         }
       ],
