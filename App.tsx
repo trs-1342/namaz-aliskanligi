@@ -124,6 +124,8 @@ const DICTS = {
     developer: 'Geliştirici',
     developerName: 'trs-1342',
     contactIntro: 'İletişim ve geri bildirim için:',
+    contributeText: 'Katkıda bulunmak, geliştirmeye destek olmak veya projeyi incelemek isteyenler kaynak koda göz atabilir.',
+    sourceCodeLabel: 'namaz-aliskanligi (kaynak kod)',
     alarmActive: 'Alarm Aktif',
     alarmNotificationTitle: 'alarmı',
     alarmNotificationBody: 'Namaz vakti alarmı aktif',
@@ -183,6 +185,8 @@ const DICTS = {
     developer: 'Developer',
     developerName: 'trs-1342',
     contactIntro: 'For contact and feedback:',
+    contributeText: 'Anyone who wants to contribute, support development, or explore the project is welcome to check out the source code.',
+    sourceCodeLabel: 'namaz-aliskanligi (source code)',
     alarmActive: 'Alarm Active',
     alarmNotificationTitle: 'alarm',
     alarmNotificationBody: 'Prayer time alarm is active',
@@ -242,6 +246,8 @@ const DICTS = {
     developer: 'المطور',
     developerName: 'trs-1342',
     contactIntro: 'للتواصل وإرسال الملاحظات:',
+    contributeText: 'من يرغب في المساهمة أو دعم التطوير أو استعراض المشروع يمكنه الاطلاع على الكود المصدري.',
+    sourceCodeLabel: 'namaz-aliskanligi (الكود المصدري)',
     alarmActive: 'المنبه نشط',
     alarmNotificationTitle: 'منبه',
     alarmNotificationBody: 'منبه وقت الصلاة نشط',
@@ -1578,9 +1584,13 @@ function AboutScreen({
 
           <View style={styles.linkRow}>
             <LinkButton icon="email-outline" label="hattab1342@gmail.com" url="mailto:hattab1342@gmail.com" colors={colors} styles={styles} />
-            <LinkButton icon="web" label="hattab.vercel.app" url="https://hattab.vercel.app" colors={colors} styles={styles} />
             <LinkButton icon="github" label="github / trs-1342" url="https://github.com/trs-1342" colors={colors} styles={styles} />
-            <LinkButton icon="linkedin" label="linkedin / halilhattabh" url="https://linkedin.com/in/halilhattabh" colors={colors} styles={styles} />
+          </View>
+
+          <Text style={[styles.bodyText, { marginTop: 12 }]}>{t.contributeText}</Text>
+
+          <View style={[styles.linkRow, { marginTop: 8 }]}>
+            <LinkButton icon="source-repository" label={t.sourceCodeLabel} url="https://github.com/trs-1342/namaz-aliskanligi" colors={colors} styles={styles} />
           </View>
         </Panel>
       </ScrollView>
