@@ -44,9 +44,12 @@ import {
   fetchMonthlyPrayerCalendar,
   PrayerTime,
 } from './src/services/prayerTimes';
-import { formatClock, getCurrentPrayer, getNextPrayer } from './src/utils/time';
+import { formatClock, getLocalDateKey, getCurrentPrayer, getNextPrayer } from './src/utils/time';
+import { TrackingScreen, TRACKING_DICTS } from './src/tracking/TrackingScreen';
+import { DayTracking, PrayerStatus, TrackingNotifMode } from './src/tracking/types';
+import { loadTrackingDays, saveTrackingDays, upsertDayStatus } from './src/tracking/storage';
 
-type Screen = 'home' | 'about';
+type Screen = 'home' | 'about' | 'tracking';
 type Language = 'tr' | 'en' | 'ar';
 type ThemePreference = 'system' | ThemeMode;
 type TimeFormat = 'system' | '24' | '12';
@@ -81,6 +84,8 @@ type StoredAppState = {
   snoozedUntilByKey: SnoozeMap;
   cachedPrayerDays: CachedPrayerDay[];
   scheduledPrayerNotificationIds: string[];
+  trackingEnabled: boolean;
+  trackingNotifMode: TrackingNotifMode;
 };
 
 const STORAGE_KEY = 'namaz-aliskanligi:v1';
@@ -126,6 +131,13 @@ const DICTS = {
     contactIntro: 'İletişim ve geri bildirim için:',
     contributeText: 'Katkıda bulunmak, geliştirmeye destek olmak veya projeyi incelemek isteyenler kaynak koda göz atabilir.',
     sourceCodeLabel: 'namaz-aliskanligi (kaynak kod)',
+    trackPrayers: 'Namazımı Takip Et',
+    trackPrayersDesc: 'Günlük namaz durumunu kaydet',
+    trackingNotif: 'Takip Bildirimi',
+    trackingNotifAlways: 'Her gün',
+    trackingNotifIfIncomplete: 'Sadece eksik varsa',
+    trackingReminderTitle: 'Namaz Takibi',
+    trackingReminderBody: 'Bugünkü namazlarını işaretlemeyi unutma.',
     alarmActive: 'Alarm Aktif',
     alarmNotificationTitle: 'alarmı',
     alarmNotificationBody: 'Namaz vakti alarmı aktif',
@@ -187,6 +199,13 @@ const DICTS = {
     contactIntro: 'For contact and feedback:',
     contributeText: 'Anyone who wants to contribute, support development, or explore the project is welcome to check out the source code.',
     sourceCodeLabel: 'namaz-aliskanligi (source code)',
+    trackPrayers: 'Track My Prayers',
+    trackPrayersDesc: 'Record your daily prayer status',
+    trackingNotif: 'Tracking Notification',
+    trackingNotifAlways: 'Every day',
+    trackingNotifIfIncomplete: 'Only if incomplete',
+    trackingReminderTitle: 'Prayer Tracking',
+    trackingReminderBody: "Don't forget to mark today's prayers.",
     alarmActive: 'Alarm Active',
     alarmNotificationTitle: 'alarm',
     alarmNotificationBody: 'Prayer time alarm is active',
@@ -248,6 +267,13 @@ const DICTS = {
     contactIntro: 'للتواصل وإرسال الملاحظات:',
     contributeText: 'من يرغب في المساهمة أو دعم التطوير أو استعراض المشروع يمكنه الاطلاع على الكود المصدري.',
     sourceCodeLabel: 'namaz-aliskanligi (الكود المصدري)',
+    trackPrayers: 'تتبع صلواتي',
+    trackPrayersDesc: 'سجّل حالة صلواتك اليومية',
+    trackingNotif: 'إشعار التتبع',
+    trackingNotifAlways: 'كل يوم',
+    trackingNotifIfIncomplete: 'فقط إذا كان هناك فائت',
+    trackingReminderTitle: 'تتبع الصلاة',
+    trackingReminderBody: 'لا تنسَ تسجيل صلوات اليوم.',
     alarmActive: 'المنبه نشط',
     alarmNotificationTitle: 'منبه',
     alarmNotificationBody: 'منبه وقت الصلاة نشط',
@@ -305,13 +331,6 @@ function detectDeviceLanguage(): Language {
   if (locale.startsWith('en')) return 'en';
   if (locale.startsWith('ar')) return 'ar';
   return 'tr';
-}
-
-function getLocalDateKey(date = new Date()) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
 }
 
 function getPrayerLabel(key: string, language: Language) {
@@ -477,6 +496,10 @@ export default function App() {
 
   const [activeAlarm, setActiveAlarm] = useState<PrayerTime | null>(null);
 
+  const [trackingEnabled, setTrackingEnabled] = useState(false);
+  const [trackingNotifMode, setTrackingNotifMode] = useState<TrackingNotifMode>('always');
+  const [trackingDays, setTrackingDays] = useState<DayTracking[]>([]);
+
   const alarmIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const alarmPlayerRef = useRef<any>(null);
   const hasRequestedLocationRef = useRef(false);
@@ -568,6 +591,9 @@ export default function App() {
 
       scheduledPrayerIdsRef.current = stored.scheduledPrayerNotificationIds ?? [];
 
+      setTrackingEnabled(stored.trackingEnabled ?? false);
+      setTrackingNotifMode(stored.trackingNotifMode ?? 'always');
+
       const today = getTodayFromCache(nextCache);
 
       if (today) {
@@ -578,6 +604,8 @@ export default function App() {
 
       setHydrated(true);
     });
+
+    loadTrackingDays().then(setTrackingDays);
   }, []);
 
   useEffect(() => {
@@ -596,6 +624,8 @@ export default function App() {
       snoozedUntilByKey,
       cachedPrayerDays,
       scheduledPrayerNotificationIds: scheduledPrayerIdsRef.current,
+      trackingEnabled,
+      trackingNotifMode,
     });
   }, [
     hydrated,
@@ -610,6 +640,8 @@ export default function App() {
     prayers,
     snoozedUntilByKey,
     cachedPrayerDays,
+    trackingEnabled,
+    trackingNotifMode,
   ]);
 
   useEffect(() => {
@@ -652,7 +684,9 @@ export default function App() {
     Notifications.getLastNotificationResponseAsync().then((response) => {
       if (!response) return;
       // 60 saniyeden eski bildirimleri atla (önceki oturumdan kalan)
-      if (Date.now() - response.notification.date.getTime() > 60_000) return;
+      const notifDate = response.notification.date;
+      const notifMs = typeof notifDate === 'number' ? notifDate : (notifDate as Date).getTime();
+      if (Date.now() - notifMs > 60_000) return;
       const data = response.notification.request.content.data;
       if (data?.isAlarm !== true) return;
       const prayerKey = typeof data.prayerKey === 'string' ? data.prayerKey : null;
@@ -814,6 +848,55 @@ export default function App() {
     }
 
     setActiveAlarm(null);
+  }
+
+  function handleUpdateTrackingStatus(date: string, key: string, status: PrayerStatus) {
+    setTrackingDays((prev) => {
+      const next = upsertDayStatus(prev, date, key, status);
+      saveTrackingDays(next).catch(() => {});
+      return next;
+    });
+  }
+
+  async function scheduleTrackingNotification(ishaTime: string) {
+    if (!trackingEnabled) return;
+
+    const today = getLocalDateKey();
+    const todayTracking = trackingDays.find((d) => d.date === today);
+
+    if (trackingNotifMode === 'ifIncomplete') {
+      const prayerKeys = prayers.map((p) => p.key);
+      const pastPrayerKeys = prayers
+        .filter((p) => {
+          const [h, m] = p.time.split(':').map(Number);
+          const now = new Date();
+          return now.getHours() * 60 + now.getMinutes() >= h * 60 + m;
+        })
+        .map((p) => p.key);
+      const hasIncomplete = pastPrayerKeys.some(
+        (k) => !todayTracking?.statuses[k]
+      );
+      if (!hasIncomplete) return;
+    }
+
+    const [ih, im] = ishaTime.split(':').map(Number);
+    const triggerDate = new Date();
+    triggerDate.setHours(ih, im + 30, 0, 0);
+    if (triggerDate <= new Date()) return;
+
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: t.trackingReminderTitle,
+        body: t.trackingReminderBody,
+        sound: false,
+        data: { isTrackingReminder: true },
+      },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.DATE,
+        date: triggerDate,
+        ...(Platform.OS === 'android' ? { channelId: 'default' } : {}),
+      },
+    });
   }
 
   async function snoozeAlarmForPrayer(prayer: PrayerTime) {
@@ -1021,6 +1104,11 @@ export default function App() {
     saveStoredState({
       scheduledPrayerNotificationIds: nextIds,
     }).catch(() => {});
+
+    const ishaEntry = times.find((p) => p.key === 'isha');
+    if (ishaEntry) {
+      scheduleTrackingNotification(ishaEntry.time).catch(() => {});
+    }
   }
 
   function togglePrayerSetting(key: string, field: PrayerToggleField) {
@@ -1127,6 +1215,7 @@ export default function App() {
             shadow={appShadow}
             onRequestLocation={() => requestLocationAndSync(true)}
             onInfo={() => setScreen('about')}
+            onTracking={trackingEnabled ? () => setScreen('tracking') : undefined}
             onTogglePrayerSetting={togglePrayerSetting}
           />
         )}
@@ -1143,6 +1232,8 @@ export default function App() {
             disableVibration={disableVibration}
             disableAlarm={disableAlarm}
             locationEnabled={locationEnabled}
+            trackingEnabled={trackingEnabled}
+            trackingNotifMode={trackingNotifMode}
             colors={appColors}
             styles={styles}
             shadow={appShadow}
@@ -1154,6 +1245,22 @@ export default function App() {
             onLanguageChange={handleLanguageChange}
             onThemePreferenceChange={setThemePreference}
             onTimeFormatChange={setTimeFormat}
+            onToggleTracking={setTrackingEnabled}
+            onTrackingNotifModeChange={setTrackingNotifMode}
+          />
+        )}
+
+        {screen === 'tracking' && (
+          <TrackingScreen
+            language={language}
+            prayers={prayers}
+            cachedPrayerDays={cachedPrayerDays}
+            trackingDays={trackingDays}
+            colors={appColors}
+            styles={styles}
+            shadow={appShadow}
+            onBack={() => setScreen('home')}
+            onUpdateStatus={handleUpdateTrackingStatus}
           />
         )}
 
@@ -1279,6 +1386,7 @@ function HomeScreen(props: {
   shadow: ReturnType<typeof createShadow>;
   onRequestLocation: () => void;
   onInfo: () => void;
+  onTracking?: () => void;
   onTogglePrayerSetting: (key: string, field: PrayerToggleField) => void;
 }) {
   const showLocationCard = !props.coords || !props.locationEnabled;
@@ -1298,6 +1406,8 @@ function HomeScreen(props: {
     <View style={props.styles.screen}>
       <TopBar
         title={props.t.appTitle}
+        leftIcon={props.onTracking ? 'calendar-month-outline' : undefined}
+        onLeft={props.onTracking}
         rightIcon="cog-outline"
         onRight={props.onInfo}
         colors={props.colors}
@@ -1398,6 +1508,8 @@ function AboutScreen({
   disableVibration,
   disableAlarm,
   locationEnabled,
+  trackingEnabled,
+  trackingNotifMode,
   colors,
   styles,
   shadow,
@@ -1409,6 +1521,8 @@ function AboutScreen({
   onLanguageChange,
   onThemePreferenceChange,
   onTimeFormatChange,
+  onToggleTracking,
+  onTrackingNotifModeChange,
 }: {
   t: typeof DICTS.tr;
   language: Language;
@@ -1420,6 +1534,8 @@ function AboutScreen({
   disableVibration: boolean;
   disableAlarm: boolean;
   locationEnabled: boolean;
+  trackingEnabled: boolean;
+  trackingNotifMode: TrackingNotifMode;
   colors: AppColors;
   styles: ReturnType<typeof createAppStyles>;
   shadow: ReturnType<typeof createShadow>;
@@ -1431,6 +1547,8 @@ function AboutScreen({
   onLanguageChange: (language: Language) => void;
   onThemePreferenceChange: (theme: ThemePreference) => void;
   onTimeFormatChange: (format: TimeFormat) => void;
+  onToggleTracking: (value: boolean) => void;
+  onTrackingNotifModeChange: (mode: TrackingNotifMode) => void;
 }) {
   const themeOptions = [
     {
@@ -1548,6 +1666,31 @@ function AboutScreen({
             styles={styles}
             onSelect={(value) => onTimeFormatChange(value as TimeFormat)}
           />
+
+          <Divider styles={styles} />
+
+          <SettingRow
+            icon="calendar-check-outline"
+            label={t.trackPrayers}
+            value={trackingEnabled}
+            colors={colors}
+            styles={styles}
+            onValueChange={onToggleTracking}
+          />
+
+          {trackingEnabled && (
+            <ChoiceRow
+              title={t.trackingNotif}
+              options={[
+                { label: t.trackingNotifAlways, value: 'always' },
+                { label: t.trackingNotifIfIncomplete, value: 'ifIncomplete' },
+              ]}
+              selected={trackingNotifMode}
+              colors={colors}
+              styles={styles}
+              onSelect={(value) => onTrackingNotifModeChange(value as TrackingNotifMode)}
+            />
+          )}
         </Panel>
 
         <Panel style={styles.aboutCard} styles={styles} shadow={shadow}>
