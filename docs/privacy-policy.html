@@ -7,42 +7,140 @@
   <style>
     body { font-family: sans-serif; max-width: 700px; margin: 40px auto; padding: 0 20px; line-height: 1.7; color: #333; }
     h1 { color: #2e7d32; }
-    h2 { margin-top: 2em; }
+    h2 { margin-top: 1.5em; }
+    .lang-section { border-top: 2px solid #e0e0e0; margin-top: 3em; padding-top: 2em; }
+    .lang-buttons { display: flex; gap: 10px; margin-bottom: 2em; flex-wrap: wrap; }
+    .lang-btn { padding: 8px 18px; border: 2px solid #2e7d32; border-radius: 6px; background: white; color: #2e7d32; cursor: pointer; font-size: 14px; font-weight: bold; }
+    .lang-btn.active { background: #2e7d32; color: white; }
+    .lang-content { display: none; }
+    .lang-content.active { display: block; }
+    [dir="rtl"] { text-align: right; }
   </style>
 </head>
 <body>
-  <h1>Gizlilik Politikası</h1>
-  <p><strong>Son güncelleme:</strong> 1 Haziran 2026</p>
 
-  <h2>Uygulama Hakkında</h2>
-  <p>Namaz Alışkanlığı uygulaması, kullanıcıların namaz vakitlerini takip etmesine ve namaz alışkanlığı geliştirmesine yardımcı olan ücretsiz bir Android uygulamasıdır.</p>
+  <div class="lang-buttons">
+    <button class="lang-btn active" onclick="switchLang('tr')">Türkçe</button>
+    <button class="lang-btn" onclick="switchLang('en')">English</button>
+    <button class="lang-btn" onclick="switchLang('ar')">العربية</button>
+  </div>
 
-  <h2>Toplanan Veriler</h2>
-  <p>Bu uygulama <strong>hiçbir kişisel veri toplamamakta, işlememekte veya üçüncü taraflarla paylaşmamaktadır.</strong></p>
-  <ul>
-    <li>Kullanıcı hesabı oluşturulmaz</li>
-    <li>Konum verisi toplanmaz (namaz vakitleri manuel seçilen şehre göre hesaplanır)</li>
-    <li>Kişisel bilgi girilmesi gerekmez</li>
-    <li>İnternet üzerinden veri gönderilmez</li>
-  </ul>
+  <!-- TÜRKÇE -->
+  <div id="lang-tr" class="lang-content active">
+    <h1>Gizlilik Politikası</h1>
+    <p><strong>Son güncelleme:</strong> 1 Haziran 2026</p>
 
-  <h2>Cihazda Saklanan Veriler</h2>
-  <p>Namaz takip kayıtları ve uygulama ayarları yalnızca <strong>kullanıcının kendi cihazında</strong> yerel olarak saklanır. Bu verilere yalnızca kullanıcı erişebilir.</p>
+    <h2>Uygulama Hakkında</h2>
+    <p>Namaz Alışkanlığı uygulaması, kullanıcıların namaz vakitlerini takip etmesine ve namaz alışkanlığı geliştirmesine yardımcı olan ücretsiz bir Android uygulamasıdır.</p>
 
-  <h2>İzinler</h2>
-  <p>Uygulama yalnızca şu izinleri kullanır:</p>
-  <ul>
-    <li><strong>Bildirim izni:</strong> Namaz vakti hatırlatmalarını göstermek için</li>
-    <li><strong>Alarm izni:</strong> Namaz vakti alarmlarını zamanında çalmak için</li>
-  </ul>
+    <h2>Toplanan Veriler</h2>
+    <p>Bu uygulama <strong>hiçbir kişisel veri toplamamakta, işlememekte veya üçüncü taraflarla paylaşmamaktadır.</strong></p>
+    <ul>
+      <li>Kullanıcı hesabı oluşturulmaz</li>
+      <li>Konum verisi toplanmaz (namaz vakitleri manuel seçilen şehre göre hesaplanır)</li>
+      <li>Kişisel bilgi girilmesi gerekmez</li>
+      <li>İnternet üzerinden veri gönderilmez</li>
+    </ul>
 
-  <h2>Üçüncü Taraf Hizmetler</h2>
-  <p>Uygulama herhangi bir reklam ağı, analitik servis veya üçüncü taraf SDK içermemektedir.</p>
+    <h2>Cihazda Saklanan Veriler</h2>
+    <p>Namaz takip kayıtları ve uygulama ayarları yalnızca <strong>kullanıcının kendi cihazında</strong> yerel olarak saklanır. Bu verilere yalnızca kullanıcı erişebilir.</p>
 
-  <h2>Değişiklikler</h2>
-  <p>Bu gizlilik politikasında yapılacak değişiklikler bu sayfada yayınlanacaktır.</p>
+    <h2>İzinler</h2>
+    <ul>
+      <li><strong>Bildirim izni:</strong> Namaz vakti hatırlatmalarını göstermek için</li>
+      <li><strong>Alarm izni:</strong> Namaz vakti alarmlarını zamanında çalmak için</li>
+    </ul>
 
-  <h2>İletişim</h2>
-  <p>Sorularınız için: <a href="mailto:hattab1342@gmail.com">hattab1342@gmail.com</a></p>
+    <h2>Üçüncü Taraf Hizmetler</h2>
+    <p>Uygulama herhangi bir reklam ağı, analitik servis veya üçüncü taraf SDK içermemektedir.</p>
+
+    <h2>Değişiklikler</h2>
+    <p>Bu gizlilik politikasında yapılacak değişiklikler bu sayfada yayınlanacaktır.</p>
+
+    <h2>İletişim</h2>
+    <p><a href="mailto:hattab1342@gmail.com">hattab1342@gmail.com</a></p>
+  </div>
+
+  <!-- ENGLISH -->
+  <div id="lang-en" class="lang-content">
+    <h1>Privacy Policy</h1>
+    <p><strong>Last updated:</strong> June 1, 2026</p>
+
+    <h2>About the App</h2>
+    <p>Namaz Alışkanlığı (Prayer Habit) is a free Android application that helps users track prayer times and build a consistent prayer habit.</p>
+
+    <h2>Data Collection</h2>
+    <p>This app <strong>does not collect, process, or share any personal data</strong> with third parties.</p>
+    <ul>
+      <li>No user account is created</li>
+      <li>No location data is collected (prayer times are calculated based on a manually selected city)</li>
+      <li>No personal information is required</li>
+      <li>No data is sent over the internet</li>
+    </ul>
+
+    <h2>Data Stored on Device</h2>
+    <p>Prayer tracking records and app settings are stored <strong>locally on the user's device only</strong>. Only the user can access this data.</p>
+
+    <h2>Permissions</h2>
+    <ul>
+      <li><strong>Notification permission:</strong> To display prayer time reminders</li>
+      <li><strong>Alarm permission:</strong> To trigger prayer time alarms on time</li>
+    </ul>
+
+    <h2>Third-Party Services</h2>
+    <p>The app does not include any ad networks, analytics services, or third-party SDKs.</p>
+
+    <h2>Changes</h2>
+    <p>Any changes to this privacy policy will be published on this page.</p>
+
+    <h2>Contact</h2>
+    <p><a href="mailto:hattab1342@gmail.com">hattab1342@gmail.com</a></p>
+  </div>
+
+  <!-- ARABIC -->
+  <div id="lang-ar" class="lang-content" dir="rtl">
+    <h1>سياسة الخصوصية</h1>
+    <p><strong>آخر تحديث:</strong> 1 يونيو 2026</p>
+
+    <h2>حول التطبيق</h2>
+    <p>تطبيق "نماز آلیشقانلیغی" (عادة الصلاة) هو تطبيق Android مجاني يساعد المستخدمين على تتبع أوقات الصلاة وتطوير عادة صلاة منتظمة.</p>
+
+    <h2>البيانات المُجمَّعة</h2>
+    <p>هذا التطبيق <strong>لا يجمع أي بيانات شخصية ولا يعالجها ولا يشاركها</strong> مع أطراف ثالثة.</p>
+    <ul>
+      <li>لا يتم إنشاء حساب مستخدم</li>
+      <li>لا يتم جمع بيانات الموقع (تُحسب أوقات الصلاة بناءً على المدينة المختارة يدويًا)</li>
+      <li>لا يُطلب إدخال أي معلومات شخصية</li>
+      <li>لا يتم إرسال أي بيانات عبر الإنترنت</li>
+    </ul>
+
+    <h2>البيانات المخزنة على الجهاز</h2>
+    <p>يتم تخزين سجلات تتبع الصلوات وإعدادات التطبيق <strong>محليًا على جهاز المستخدم فقط</strong>. لا يمكن الوصول إلى هذه البيانات إلا من قِبل المستخدم.</p>
+
+    <h2>الأذونات</h2>
+    <ul>
+      <li><strong>إذن الإشعارات:</strong> لعرض تذكيرات أوقات الصلاة</li>
+      <li><strong>إذن التنبيه:</strong> لتشغيل منبّه أوقات الصلاة في وقته</li>
+    </ul>
+
+    <h2>خدمات الطرف الثالث</h2>
+    <p>لا يحتوي التطبيق على أي شبكات إعلانية أو خدمات تحليلية أو SDKs تابعة لجهات خارجية.</p>
+
+    <h2>التغييرات</h2>
+    <p>سيتم نشر أي تغييرات على سياسة الخصوصية في هذه الصفحة.</p>
+
+    <h2>التواصل</h2>
+    <p><a href="mailto:hattab1342@gmail.com">hattab1342@gmail.com</a></p>
+  </div>
+
+  <script>
+    function switchLang(lang) {
+      document.querySelectorAll('.lang-content').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.lang-btn').forEach(el => el.classList.remove('active'));
+      document.getElementById('lang-' + lang).classList.add('active');
+      event.target.classList.add('active');
+    }
+  </script>
+
 </body>
 </html>
