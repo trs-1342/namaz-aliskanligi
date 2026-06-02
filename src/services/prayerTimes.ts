@@ -1,7 +1,9 @@
+import { Coordinates, CalculationMethod, PrayerTimes, Rounding } from 'adhan';
+
 export type PrayerTime = {
   key: string;
   name: string;
-  time: string;
+  time: string; // HH:MM:SS — display rounds to nearest minute, scheduling uses exact seconds
   notification: boolean;
   vibration: boolean;
   alarm: boolean;
@@ -12,138 +14,55 @@ export type CachedPrayerDay = {
   prayers: PrayerTime[];
 };
 
-function cleanTime(value: string) {
-  return value.split(' ')[0].slice(0, 5);
+function pad2(n: number): string {
+  return String(n).padStart(2, '0');
 }
 
-function toIsoDateFromAladhan(value: string) {
-  // AlAdhan: DD-MM-YYYY
-  const [day, month, year] = value.split('-');
-  return `${year}-${month}-${day}`;
+function formatExact(date: Date): string {
+  return `${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`;
 }
 
-function buildPrayers(timings: Record<string, string>): PrayerTime[] {
+function buildPrayers(pt: PrayerTimes): PrayerTime[] {
   return [
-    {
-      key: 'fajr',
-      name: 'İmsak',
-      time: cleanTime(timings.Fajr),
-      notification: true,
-      vibration: true,
-      alarm: true,
-    },
-    {
-      key: 'sunrise',
-      name: 'Güneş',
-      time: cleanTime(timings.Sunrise),
-      notification: false,
-      vibration: false,
-      alarm: false,
-    },
-    {
-      key: 'dhuhr',
-      name: 'Öğle',
-      time: cleanTime(timings.Dhuhr),
-      notification: true,
-      vibration: true,
-      alarm: true,
-    },
-    {
-      key: 'asr',
-      name: 'İkindi',
-      time: cleanTime(timings.Asr),
-      notification: true,
-      vibration: true,
-      alarm: true,
-    },
-    {
-      key: 'maghrib',
-      name: 'Akşam',
-      time: cleanTime(timings.Maghrib),
-      notification: true,
-      vibration: true,
-      alarm: true,
-    },
-    {
-      key: 'isha',
-      name: 'Yatsı',
-      time: cleanTime(timings.Isha),
-      notification: true,
-      vibration: true,
-      alarm: true,
-    },
+    { key: 'fajr',    name: 'İmsak',  time: formatExact(pt.fajr),    notification: true,  vibration: true,  alarm: true  },
+    { key: 'sunrise', name: 'Güneş',  time: formatExact(pt.sunrise), notification: false, vibration: false, alarm: false },
+    { key: 'dhuhr',   name: 'Öğle',   time: formatExact(pt.dhuhr),   notification: true,  vibration: true,  alarm: true  },
+    { key: 'asr',     name: 'İkindi', time: formatExact(pt.asr),     notification: true,  vibration: true,  alarm: true  },
+    { key: 'maghrib', name: 'Akşam',  time: formatExact(pt.maghrib), notification: true,  vibration: true,  alarm: true  },
+    { key: 'isha',    name: 'Yatsı',  time: formatExact(pt.isha),    notification: true,  vibration: true,  alarm: true  },
   ];
 }
 
-export async function fetchPrayerTimes(latitude: number, longitude: number): Promise<PrayerTime[]> {
-  const url = `https://api.aladhan.com/v1/timings?latitude=${latitude}&longitude=${longitude}&method=13`;
-
-  const res = await fetch(url);
-
-  if (!res.ok) {
-    throw new Error('Prayer API request failed');
-  }
-
-  const json = await res.json();
-  const timings = json.data.timings;
-
-  return buildPrayers(timings);
+function calculate(latitude: number, longitude: number, date: Date): PrayerTime[] {
+  const coords = new Coordinates(latitude, longitude);
+  const params = CalculationMethod.Turkey();
+  params.rounding = Rounding.None;
+  return buildPrayers(new PrayerTimes(coords, date, params));
 }
 
-async function fetchCalendarMonth(
-  latitude: number,
-  longitude: number,
-  year: number,
-  month: number
-): Promise<CachedPrayerDay[]> {
-  const url = `https://api.aladhan.com/v1/calendar/${year}/${month}?latitude=${latitude}&longitude=${longitude}&method=13`;
-
-  const res = await fetch(url);
-
-  if (!res.ok) {
-    throw new Error('Prayer calendar API request failed');
-  }
-
-  const json = await res.json();
-
-  return json.data.map((day: any) => ({
-    date: toIsoDateFromAladhan(day.date.gregorian.date),
-    prayers: buildPrayers(day.timings),
-  }));
+function getLocalDateKey(date = new Date()): string {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
 }
 
-function addMonths(date: Date, count: number) {
-  const next = new Date(date);
-  next.setMonth(next.getMonth() + count);
-  return next;
+export function fetchPrayerTimes(latitude: number, longitude: number): Promise<PrayerTime[]> {
+  return Promise.resolve(calculate(latitude, longitude, new Date()));
 }
 
-function getLocalDateKey(date = new Date()) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-
-  return `${year}-${month}-${day}`;
-}
-
-export async function fetchMonthlyPrayerCalendar(
+export function fetchMonthlyPrayerCalendar(
   latitude: number,
   longitude: number,
   startDate = new Date()
 ): Promise<CachedPrayerDay[]> {
-  const currentYear = startDate.getFullYear();
-  const currentMonth = startDate.getMonth() + 1;
-
-  const nextDate = addMonths(startDate, 1);
-  const nextYear = nextDate.getFullYear();
-  const nextMonth = nextDate.getMonth() + 1;
-
-  const currentMonthData = await fetchCalendarMonth(latitude, longitude, currentYear, currentMonth);
-  const nextMonthData = await fetchCalendarMonth(latitude, longitude, nextYear, nextMonth);
-
   const today = getLocalDateKey(startDate);
+  const result: CachedPrayerDay[] = [];
 
-  return [...currentMonthData, ...nextMonthData]
-    .filter((item) => item.date >= today)
-    .slice(0, 32);
+  for (let i = 0; i < 35; i++) {
+    const date = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate() + i);
+    const dateKey = getLocalDateKey(date);
+    if (dateKey < today) continue;
+    result.push({ date: dateKey, prayers: calculate(latitude, longitude, date) });
+    if (result.length >= 32) break;
+  }
+
+  return Promise.resolve(result);
 }
