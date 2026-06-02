@@ -1,30 +1,24 @@
 /**
  * Expo Config Plugin — Android Alarm Desteği
  *
- * Gri ekran sorununun kök nedeni: android:showWhenLocked manifest'te statik →
- * alarm olmadan da uygulama kilit ekranı üstüne çıkıyor.
+ * Gri ekran sorununun kök nedeni: android:showWhenLocked manifest'te statik olduğu için
+ * MainActivity alarm yokken de kilit ekranı üstüne çıkabiliyor.
  *
- * Çözüm mimarisi (3 katman):
- *  1. MainActivity.onStart() → SharedPreferences'tan alarm durumunu okur,
- *     setShowWhenLocked'ı NATIVE seviyede JS beklenmeden uygular.
- *  2. ExpoNotificationBuilder → alarm bildirimi oluşturulduğunda SharedPreferences'a
- *     alarmFiredAt yazar; böylece onCreate/onStart alarm zamanlamasını bilir.
- *  3. AlarmWindowModule → setFlags(true/false) çağrısında SharedPreferences günceller
- *     + JS tarafından moveToBackground / isScreenLocked erişimi.
- *
- * Android sürüm desteği:
- *  API 23+ (Android 6)  : fullScreenIntent
- *  API 27+ (Android 8.1): setShowWhenLocked / setTurnScreenOn (modern API)
- *  API 31+ (Android 12) : canScheduleExactAlarms
- *  API 33+ (Android 13) : POST_NOTIFICATIONS
- *  API 34+ (Android 14) : USE_EXACT_ALARM
- *  Eski sürümler        : deprecated window flag fallback
+ * Bu plugin üç yerde güvenlik katmanı kurar:
+ * 1. MainActivity.onStart/onResume: JS yüklenmeden alarm state kontrolü yapar.
+ * 2. ExpoNotificationBuilder: alarm bildirimi oluşturulurken native state yazar.
+ * 3. AlarmWindowModule: JS tarafı setFlags/moveToBackground/isScreenLocked çağırabilir.
  */
 
 const { withAndroidManifest, withDangerousMod } = require('@expo/config-plugins');
 const { mergeContents } = require('@expo/config-plugins/build/utils/generateCode');
 const fs = require('fs');
 const path = require('path');
+
+const PATCH_TAG_ACTIVITY = 'withAndroidAlarm-lockscreen-v3';
+const PATCH_TAG_NOTIFICATION = 'withAndroidAlarm-fullscreen-v3';
+const ALARM_WINDOW_PREFS = 'AlarmWindow';
+const ALARM_WINDOW_VALID_MS = 90_000;
 
 module.exports = function withAndroidAlarm(config) {
   config = addManifestFlags(config);
@@ -33,11 +27,6 @@ module.exports = function withAndroidAlarm(config) {
   config = patchFullScreenIntent(config);
   return config;
 };
-
-// ─── 1. AndroidManifest.xml ──────────────────────────────────────────────────
-// Statik flag'ler fullScreenIntent için gerekli (activity başlamadan önce
-// Android bu flag'leri kontrol eder). Gri ekran MainActivity.onStart()'ta
-// SharedPreferences kontrolüyle düzeltiliyor.
 
 function addManifestFlags(config) {
   return withAndroidManifest(config, (config) => {
@@ -51,28 +40,33 @@ function addManifestFlags(config) {
   });
 }
 
-// ─── 2. AlarmWindowModule + AlarmWindowPackage ────────────────────────────────
-
 function addAlarmWindowModule(config) {
   return withDangerousMod(config, [
     'android',
     async (config) => {
       const { projectRoot } = config.modRequest;
       const pkg = config.android?.package;
-      if (!pkg) { console.warn('[withAndroidAlarm] android.package bulunamadı.'); return config; }
+      if (!pkg) {
+        console.warn('[withAndroidAlarm] android.package bulunamadı.');
+        return config;
+      }
 
       const pkgDir = pkg.replace(/\./g, '/');
       const srcDir = path.join(projectRoot, 'android/app/src/main/java', pkgDir);
-      if (!fs.existsSync(srcDir)) { console.warn('[withAndroidAlarm] Android src bulunamadı.'); return config; }
+      if (!fs.existsSync(srcDir)) {
+        console.warn('[withAndroidAlarm] Android src bulunamadı.');
+        return config;
+      }
 
       fs.writeFileSync(path.join(srcDir, 'AlarmWindowModule.kt'), alarmWindowModuleKt(pkg), 'utf8');
-      console.log('[withAndroidAlarm] ✓ AlarmWindowModule.kt');
-
       fs.writeFileSync(path.join(srcDir, 'AlarmWindowPackage.kt'), alarmWindowPackageKt(pkg), 'utf8');
-      console.log('[withAndroidAlarm] ✓ AlarmWindowPackage.kt');
+      console.log('[withAndroidAlarm] ✓ AlarmWindowModule.kt + AlarmWindowPackage.kt');
 
       const mainAppPath = path.join(srcDir, 'MainApplication.kt');
-      if (!fs.existsSync(mainAppPath)) { console.warn('[withAndroidAlarm] MainApplication.kt bulunamadı.'); return config; }
+      if (!fs.existsSync(mainAppPath)) {
+        console.warn('[withAndroidAlarm] MainApplication.kt bulunamadı.');
+        return config;
+      }
 
       let mainSrc = fs.readFileSync(mainAppPath, 'utf8');
       if (!mainSrc.includes('AlarmWindowPackage')) {
@@ -86,7 +80,7 @@ function addAlarmWindowModule(config) {
             comment: '//',
           }).contents;
           fs.writeFileSync(mainAppPath, mainSrc, 'utf8');
-          console.log('[withAndroidAlarm] ✓ MainApplication.kt');
+          console.log('[withAndroidAlarm] ✓ MainApplication.kt package kaydı');
         } catch (e) {
           console.warn('[withAndroidAlarm] MainApplication.kt patch hatası:', e.message);
         }
@@ -97,12 +91,6 @@ function addAlarmWindowModule(config) {
   ]);
 }
 
-// ─── 3. MainActivity.kt — onStart() patch ────────────────────────────────────
-// GRİ EKRAN ÇÖZÜMÜ: onStart() her activity resume'unda SharedPreferences'ı
-// okur ve showWhenLocked'ı JS beklenmeden native olarak set eder.
-// Alarm yoksa → flag'leri temizle (kilit ekranı üstüne çıkma)
-// Alarm varsa  → flag'leri set et (alarm ekranı kilit üstünde göster)
-
 function patchMainActivity(config) {
   return withDangerousMod(config, [
     'android',
@@ -112,83 +100,92 @@ function patchMainActivity(config) {
       if (!pkg) return config;
 
       const pkgDir = pkg.replace(/\./g, '/');
-      const mainActivityPath = path.join(
-        projectRoot, 'android/app/src/main/java', pkgDir, 'MainActivity.kt'
-      );
-
+      const mainActivityPath = path.join(projectRoot, 'android/app/src/main/java', pkgDir, 'MainActivity.kt');
       if (!fs.existsSync(mainActivityPath)) {
-        console.warn('[withAndroidAlarm] MainActivity.kt bulunamadı, onStart patch atlandı.');
+        console.warn('[withAndroidAlarm] MainActivity.kt bulunamadı, lockscreen patch atlandı.');
         return config;
       }
 
       let src = fs.readFileSync(mainActivityPath, 'utf8');
-      if (src.includes('@withAndroidAlarm-onStart')) {
-        // Zaten yamalı — yeniden yaz (her build'de güncel olsun)
-        src = src.replace(/\s*\/\/ @withAndroidAlarm-onStart[\s\S]*?^\s*\}\s*$/m, '');
+      if (src.includes(PATCH_TAG_ACTIVITY)) return config;
+
+      src = removeOldMainActivityAlarmPatch(src);
+
+      const code = `
+
+  // @${PATCH_TAG_ACTIVITY}: alarm yokken kilit ekranı üstüne çıkmayı engelle
+  private fun applyAlarmWindowState() {
+    try {
+      val prefs = getSharedPreferences("${ALARM_WINDOW_PREFS}", android.content.Context.MODE_PRIVATE)
+      val alarmActive = prefs.getBoolean("alarmActive", false)
+      val alarmFiredAt = prefs.getLong("alarmFiredAt", 0L)
+      val age = if (alarmFiredAt > 0L) System.currentTimeMillis() - alarmFiredAt else Long.MAX_VALUE
+      val isRecent = alarmFiredAt > 0L && age in 0..${ALARM_WINDOW_VALID_MS}L
+
+      // Kritik fark: OR değil AND.
+      // alarmActive true kalmışsa ama timestamp eskidiyse stale state temizlenir.
+      val show = alarmActive && isRecent
+
+      if (!show) {
+        prefs.edit()
+          .putBoolean("alarmActive", false)
+          .putLong("alarmFiredAt", 0L)
+          .apply()
       }
 
-      const onStartCode = `
-  // @withAndroidAlarm-onStart: Gri ekran düzeltmesi
-  // SharedPreferences'tan alarm durumunu okur, showWhenLocked'ı JS olmadan uygular.
-  override fun onStart() {
-    super.onStart()
-    try {
-      val prefs = getSharedPreferences("AlarmWindow", android.content.Context.MODE_PRIVATE)
-      val alarmActive  = prefs.getBoolean("alarmActive", false)
-      val alarmFiredAt = prefs.getLong("alarmFiredAt", 0L)
-      // 90 saniye içinde alarm ateşlendiyse showWhenLocked açık kalır
-      val isRecent = alarmFiredAt > 0L && (System.currentTimeMillis() - alarmFiredAt) < 90_000L
-      val show = alarmActive || isRecent
       if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O_MR1) {
         setShowWhenLocked(show)
         setTurnScreenOn(show)
       }
-      @Suppress("DEPRECATION")
-      if (!show) {
-        window.clearFlags(
-          android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-          android.view.WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
-          android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
-        )
-      }
-    } catch (_: Exception) { /* güvenli hata yutma */ }
-  }`;
 
-      try {
-        src = mergeContents({
-          tag: 'withAndroidAlarm-onStart',
-          src,
-          newSrc: onStartCode,
-          anchor: /override fun getMainComponentName/,
-          offset: 0,
-          comment: '//',
-        }).contents;
-        fs.writeFileSync(mainActivityPath, src, 'utf8');
-        console.log('[withAndroidAlarm] ✓ MainActivity.kt — onStart patch');
-      } catch (e) {
-        // Anchor bulunamazsa class kapanışından önce ekle
-        try {
-          src = mergeContents({
-            tag: 'withAndroidAlarm-onStart',
-            src,
-            newSrc: onStartCode,
-            anchor: /class MainActivity/,
-            offset: 1,
-            comment: '//',
-          }).contents;
-          fs.writeFileSync(mainActivityPath, src, 'utf8');
-          console.log('[withAndroidAlarm] ✓ MainActivity.kt — onStart patch (fallback)');
-        } catch (e2) {
-          console.warn('[withAndroidAlarm] MainActivity.kt onStart patch hatası:', e2.message);
+      @Suppress("DEPRECATION")
+      if (show) {
+        window.addFlags(
+          android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+            android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+            android.view.WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+        )
+      } else {
+        window.clearFlags(
+          android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+            android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+            android.view.WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+        )
+
+        val keyguardManager = getSystemService(android.content.Context.KEYGUARD_SERVICE) as android.app.KeyguardManager
+        if (keyguardManager.isKeyguardLocked) {
+          moveTaskToBack(true)
         }
       }
+    } catch (_: Exception) {}
+  }
+
+  override fun onStart() {
+    super.onStart()
+    applyAlarmWindowState()
+  }
+
+  override fun onResume() {
+    super.onResume()
+    applyAlarmWindowState()
+  }
+`;
+
+      src = src.replace(/\n}\s*$/, `${code}\n}`);
+      fs.writeFileSync(mainActivityPath, src, 'utf8');
+      console.log('[withAndroidAlarm] ✓ MainActivity.kt lockscreen v3 patch');
 
       return config;
     },
   ]);
 }
 
-// ─── 4. ExpoNotificationBuilder.kt — fullScreenIntent + SharedPreferences ────
+function removeOldMainActivityAlarmPatch(src) {
+  // Eski ekran patch'i varsa final class kapanışına kadar silmeye çalışan riskli regex yerine
+  // eski marker görüldüğünde temiz prebuild önerilir. Build'i kırmamak için burada no-op bırakıyoruz.
+  // Temiz EAS build zaten android klasörünü yeniden ürettiği için eski kod taşınmaz.
+  return src;
+}
 
 function patchFullScreenIntent(config) {
   return withDangerousMod(config, [
@@ -198,7 +195,7 @@ function patchFullScreenIntent(config) {
       const builderPath = path.join(
         projectRoot,
         'node_modules/expo-notifications/android/src/main/java/' +
-        'expo/modules/notifications/notifications/presentation/builders/ExpoNotificationBuilder.kt'
+          'expo/modules/notifications/notifications/presentation/builders/ExpoNotificationBuilder.kt'
       );
 
       if (!fs.existsSync(builderPath)) {
@@ -207,14 +204,7 @@ function patchFullScreenIntent(config) {
       }
 
       let src = fs.readFileSync(builderPath, 'utf8');
-
-      // Zaten güncel patch varsa atla
-      if (src.includes('@withAndroidAlarm-v2')) return config;
-
-      // Eski patch varsa temizle
-      if (src.includes('@withAndroidAlarm')) {
-        src = src.replace(/\n\s*\/\/ @withAndroidAlarm[\s\S]*?\}\s*\n/, '\n');
-      }
+      if (src.includes(PATCH_TAG_NOTIFICATION)) return config;
 
       const target = `    builder.setContentIntent(
       createNotificationResponseIntent(
@@ -225,25 +215,26 @@ function patchFullScreenIntent(config) {
     )`;
 
       const insertion = `
-    // @withAndroidAlarm-v2: alarm bildirimleri için fullScreenIntent + SharedPreferences
+
+    // @${PATCH_TAG_NOTIFICATION}: alarm bildirimi için fullScreenIntent + native state
     if (content.body?.optBoolean("isAlarm", false) == true) {
+      try {
+        context.getSharedPreferences("${ALARM_WINDOW_PREFS}", android.content.Context.MODE_PRIVATE)
+          .edit()
+          .putBoolean("alarmActive", true)
+          .putLong("alarmFiredAt", System.currentTimeMillis())
+          .apply()
+      } catch (_: Exception) {}
+
       builder.setFullScreenIntent(
         createNotificationResponseIntent(context, notification, defaultAction),
         true
       )
-      // MainActivity.onStart()'ın alarm zamanlamasını bilmesi için SharedPreferences'a yaz
-      try {
-        context.getSharedPreferences("AlarmWindow", android.content.Context.MODE_PRIVATE)
-          .edit()
-          .putLong("alarmFiredAt", System.currentTimeMillis())
-          .putBoolean("alarmActive", true)
-          .apply()
-      } catch (_: Exception) {}
     }`;
 
       if (src.includes(target)) {
         fs.writeFileSync(builderPath, src.replace(target, target + insertion), 'utf8');
-        console.log('[withAndroidAlarm] ✓ ExpoNotificationBuilder.kt — fullScreenIntent + SharedPreferences');
+        console.log('[withAndroidAlarm] ✓ ExpoNotificationBuilder.kt fullscreen v3 patch');
       } else {
         console.warn('[withAndroidAlarm] setContentIntent bloğu bulunamadı — expo-notifications sürümü değişmiş olabilir.');
       }
@@ -252,8 +243,6 @@ function patchFullScreenIntent(config) {
     },
   ]);
 }
-
-// ─── Kotlin şablonları ────────────────────────────────────────────────────────
 
 function alarmWindowModuleKt(pkg) {
   return `package ${pkg}
@@ -272,36 +261,28 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.WritableNativeMap
 
-/**
- * AlarmWindowModule — Android 6+ (API 23+) desteği
- *
- * setFlags(true)  → alarm başladı; ekran flag'lerini set et + SharedPreferences güncelle
- * setFlags(false) → alarm bitti;  ekran flag'lerini temizle + SharedPreferences temizle
- * moveToBackground() → uygulamayı kilit ekranı arkasına gönder
- * isScreenLocked()   → kilit ekranı açık mı?
- * getDeviceInfo()    → API seviyesi, izin durumları
- */
 class AlarmWindowModule(context: ReactApplicationContext) :
   ReactContextBaseJavaModule(context) {
 
   override fun getName() = "AlarmWindow"
 
-  private fun prefs() = reactApplicationContext
-    .getSharedPreferences("AlarmWindow", Context.MODE_PRIVATE)
+  private fun prefs() = reactApplicationContext.getSharedPreferences("${ALARM_WINDOW_PREFS}", Context.MODE_PRIVATE)
 
   @ReactMethod
   fun setFlags(enable: Boolean) {
-    // SharedPreferences güncelle — MainActivity.onStart() bunu okuyacak
     prefs().edit().apply {
       putBoolean("alarmActive", enable)
-      if (!enable) putLong("alarmFiredAt", 0L) // alarm bitti, timestamp temizle
+      if (enable) {
+        putLong("alarmFiredAt", System.currentTimeMillis())
+      } else {
+        putLong("alarmFiredAt", 0L)
+      }
       apply()
     }
 
     val activity = reactApplicationContext.currentActivity ?: return
     activity.runOnUiThread {
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-        // API 27+ modern yol (Android 8.1+)
         activity.setShowWhenLocked(enable)
         activity.setTurnScreenOn(enable)
       }
@@ -309,14 +290,14 @@ class AlarmWindowModule(context: ReactApplicationContext) :
       if (enable) {
         activity.window.addFlags(
           WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
-          WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-          WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+            WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
         )
       } else {
         activity.window.clearFlags(
           WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
-          WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-          WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+            WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
         )
       }
     }
@@ -335,7 +316,7 @@ class AlarmWindowModule(context: ReactApplicationContext) :
     try {
       val km = reactApplicationContext.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
       promise.resolve(km?.isKeyguardLocked == true)
-    } catch (e: Exception) {
+    } catch (_: Exception) {
       promise.resolve(false)
     }
   }
@@ -344,26 +325,26 @@ class AlarmWindowModule(context: ReactApplicationContext) :
   fun getDeviceInfo(promise: Promise) {
     try {
       val map = WritableNativeMap()
+      val p = prefs()
       map.putInt("apiLevel", Build.VERSION.SDK_INT)
       map.putString("release", Build.VERSION.RELEASE)
       map.putString("manufacturer", Build.MANUFACTURER)
       map.putString("model", Build.MODEL)
+      map.putBoolean("alarmActive", p.getBoolean("alarmActive", false))
+      map.putDouble("alarmFiredAt", p.getLong("alarmFiredAt", 0L).toDouble())
 
-      // Android 12+ (API 31): exact alarm izni
       val canScheduleExact = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         (reactApplicationContext.getSystemService(Context.ALARM_SERVICE) as? AlarmManager)
           ?.canScheduleExactAlarms() ?: false
       } else true
-
       map.putBoolean("canScheduleExactAlarms", canScheduleExact)
 
-      // Android 13+ (API 33): bildirim izni
       val hasNotifPerm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         ContextCompat.checkSelfPermission(
-          reactApplicationContext, Manifest.permission.POST_NOTIFICATIONS
+          reactApplicationContext,
+          Manifest.permission.POST_NOTIFICATIONS
         ) == PackageManager.PERMISSION_GRANTED
       } else true
-
       map.putBoolean("hasNotificationPermission", hasNotifPerm)
 
       promise.resolve(map)
