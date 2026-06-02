@@ -3,10 +3,8 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
-  AppState,
   Appearance,
   Linking,
-  NativeModules,
   PanResponder,
   Platform,
   Pressable,
@@ -542,16 +540,7 @@ function App() {
   const alarmPlayerRef = useRef<any>(null);
   const hasRequestedLocationRef = useRef(false);
   const scheduledPrayerIdsRef = useRef<string[]>([]);
-  const activeAlarmRef = useRef<PrayerTime | null>(null);
-
-  activeAlarmRef.current = activeAlarm;
-
   const themeMode: ThemeMode = themePreference === 'system' ? deviceScheme : themePreference;
-
-  // Android sürümüne göre özellik desteği
-  const androidApi = Platform.OS === 'android' ? (Platform.Version as number) : 0;
-  const supportsFullScreenIntent = androidApi === 0 || androidApi >= 23;
-  const supportsSetShowWhenLocked = androidApi === 0 || androidApi >= 27;
   const t = DICTS[language];
 
   const appColors = themes[themeMode];
@@ -712,33 +701,6 @@ function App() {
     }
   }, [hydrated, locationEnabled]);
 
-  // Gri ekran JS güvenlik katmanı (Katman 2 ve 3)
-  // Katman 1 (MainActivity.onStart/onResume) native tarafta SharedPreferences ile hallediliyor.
-  useEffect(() => {
-    if (Platform.OS !== 'android') return;
-    const sub = AppState.addEventListener('change', async (state) => {
-      // Ekran kilitlenince: flags'leri anında temizle (gri ekranı önle)
-      if ((state === 'inactive' || state === 'background') && !activeAlarmRef.current) {
-        NativeModules.AlarmWindow?.setFlags?.(false);
-      }
-      // Ekran açılınca: fullScreenIntent race condition için 1 sn bekle
-      if (state === 'active') {
-        await new Promise<void>((r) => setTimeout(r, 1000));
-        if (!activeAlarmRef.current) {
-          try {
-            const locked = await NativeModules.AlarmWindow?.isScreenLocked?.();
-            if (locked && !activeAlarmRef.current) {
-              NativeModules.AlarmWindow?.setFlags?.(false);
-              NativeModules.AlarmWindow?.moveToBackground?.();
-            }
-          } catch {}
-        }
-      }
-    });
-    return () => sub.remove();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   // Hydration sonrası: activeAlarm'ı güncel prayer saatiyle senkronize et
   // (cold-start'ta bildirimden önce fallback prayer zamanı set edilmiş olabilir)
   useEffect(() => {
@@ -879,11 +841,6 @@ function App() {
 
     setActiveAlarm(prayer);
 
-    // Kilitli ekranda göster, ekranı aç (API 23+ destekleyen cihazlarda)
-    if (Platform.OS === 'android') {
-      NativeModules.AlarmWindow?.setFlags(true);
-    }
-
     try {
       alarmPlayerRef.current?.seekTo?.(0);
       alarmPlayerRef.current?.play?.();
@@ -913,11 +870,6 @@ function App() {
     if (alarmIntervalRef.current) {
       clearInterval(alarmIntervalRef.current);
       alarmIntervalRef.current = null;
-    }
-
-    // Ekran flag'lerini temizle
-    if (Platform.OS === 'android') {
-      NativeModules.AlarmWindow?.setFlags(false);
     }
 
     setActiveAlarm(null);
