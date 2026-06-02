@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
+  AppState,
   Appearance,
   Linking,
   NativeModules,
@@ -106,7 +107,7 @@ const DICTS = {
     internetStatus: 'İnternet Bağlantısı',
     internetOnline: 'Bağlı',
     internetOffline: 'Çevrimdışı',
-    offlineMode: 'Çevrimdışı mod: kayıtlı vakitler kullanılıyor.',
+    offlineMode: 'Namaz vakitleri internet gerektirmeden lokal hesaplanıyor.',
     systemSettings: 'Sistem Ayarları',
     muteAll: 'Tümünü Sustur',
     disableVibration: 'Titreşimleri Kapat',
@@ -174,7 +175,7 @@ const DICTS = {
     internetStatus: 'Internet Connection',
     internetOnline: 'Online',
     internetOffline: 'Offline',
-    offlineMode: 'Offline mode: saved prayer times are being used.',
+    offlineMode: 'Prayer times are calculated locally without internet.',
     systemSettings: 'System Settings',
     muteAll: 'Mute All',
     disableVibration: 'Disable Vibrations',
@@ -242,7 +243,7 @@ const DICTS = {
     internetStatus: 'اتصال الإنترنت',
     internetOnline: 'متصل',
     internetOffline: 'غير متصل',
-    offlineMode: 'وضع عدم الاتصال: يتم استخدام الأوقات المحفوظة.',
+    offlineMode: 'يتم حساب أوقات الصلاة محلياً دون الحاجة للإنترنت.',
     systemSettings: 'إعدادات النظام',
     muteAll: 'كتم الكل',
     disableVibration: 'إيقاف الاهتزاز',
@@ -367,18 +368,26 @@ function formatTimeValue(value: string | undefined, language: Language, format: 
   if (!value) return '--:--';
 
   const mode = resolveTimeFormat(format);
-  const [hourRaw, minuteRaw] = value.split(':').map(Number);
+  const parts = value.split(':').map(Number);
+  const rawH = parts[0];
+  const rawM = parts[1];
+  const rawS = parts[2] ?? 0;
 
-  if (Number.isNaN(hourRaw) || Number.isNaN(minuteRaw)) {
+  if (Number.isNaN(rawH) || Number.isNaN(rawM)) {
     return formatForLanguage(value, language);
   }
 
+  // HH:MM:SS formatında saniyeye göre dakikayı yuvarla
+  let h = rawH;
+  let m = rawM + (rawS >= 30 ? 1 : 0);
+  if (m >= 60) { m = 0; h = (h + 1) % 24; }
+
   if (mode === '24') {
-    return formatForLanguage(`${String(hourRaw).padStart(2, '0')}:${String(minuteRaw).padStart(2, '0')}`, language);
+    return formatForLanguage(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`, language);
   }
 
   const period =
-    hourRaw >= 12
+    h >= 12
       ? language === 'tr'
         ? 'ÖS'
         : language === 'ar'
@@ -390,8 +399,8 @@ function formatTimeValue(value: string | undefined, language: Language, format: 
           ? 'ص'
           : 'AM';
 
-  const hour12 = hourRaw % 12 || 12;
-  const result = `${hour12}:${String(minuteRaw).padStart(2, '0')} ${period}`;
+  const hour12 = h % 12 || 12;
+  const result = `${hour12}:${String(m).padStart(2, '0')} ${period}`;
 
   return formatForLanguage(result, language);
 }
@@ -462,7 +471,36 @@ async function saveStoredState(state: Partial<StoredAppState>) {
   }
 }
 
-export default function App() {
+class AppErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { error: Error | null }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error: Error) { return { error }; }
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error('[CRASH]', error.message, error.stack, info.componentStack);
+  }
+  render() {
+    const { error } = this.state;
+    if (error) {
+      return (
+        <View style={{ flex: 1, backgroundColor: '#0d0d0d', padding: 24, paddingTop: 60 }}>
+          <Text style={{ color: '#C9A84C', fontSize: 16, fontWeight: 'bold', marginBottom: 12 }}>Uygulama Hatası</Text>
+          <ScrollView>
+            <Text style={{ color: '#ff6b6b', fontSize: 13, marginBottom: 8 }}>{error.message || String(error)}</Text>
+            {Boolean(error.stack) && <Text style={{ color: '#555', fontSize: 11 }}>{error.stack}</Text>}
+          </ScrollView>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function App() {
   const [fontsLoaded] = useFonts({
     Inter_300Light,
     Inter_400Regular,
@@ -504,8 +542,16 @@ export default function App() {
   const alarmPlayerRef = useRef<any>(null);
   const hasRequestedLocationRef = useRef(false);
   const scheduledPrayerIdsRef = useRef<string[]>([]);
+  const activeAlarmRef = useRef<PrayerTime | null>(null);
+
+  activeAlarmRef.current = activeAlarm;
 
   const themeMode: ThemeMode = themePreference === 'system' ? deviceScheme : themePreference;
+
+  // Android sürümüne göre özellik desteği
+  const androidApi = Platform.OS === 'android' ? (Platform.Version as number) : 0;
+  const supportsFullScreenIntent = androidApi === 0 || androidApi >= 23;
+  const supportsSetShowWhenLocked = androidApi === 0 || androidApi >= 27;
   const t = DICTS[language];
 
   const appColors = themes[themeMode];
@@ -666,6 +712,33 @@ export default function App() {
     }
   }, [hydrated, locationEnabled]);
 
+  // Gri ekran JS güvenlik katmanı (Katman 2 ve 3)
+  // Katman 1 (MainActivity.onStart/onResume) native tarafta SharedPreferences ile hallediliyor.
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const sub = AppState.addEventListener('change', async (state) => {
+      // Ekran kilitlenince: flags'leri anında temizle (gri ekranı önle)
+      if ((state === 'inactive' || state === 'background') && !activeAlarmRef.current) {
+        NativeModules.AlarmWindow?.setFlags?.(false);
+      }
+      // Ekran açılınca: fullScreenIntent race condition için 1 sn bekle
+      if (state === 'active') {
+        await new Promise<void>((r) => setTimeout(r, 1000));
+        if (!activeAlarmRef.current) {
+          try {
+            const locked = await NativeModules.AlarmWindow?.isScreenLocked?.();
+            if (locked && !activeAlarmRef.current) {
+              NativeModules.AlarmWindow?.setFlags?.(false);
+              NativeModules.AlarmWindow?.moveToBackground?.();
+            }
+          } catch {}
+        }
+      }
+    });
+    return () => sub.remove();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Hydration sonrası: activeAlarm'ı güncel prayer saatiyle senkronize et
   // (cold-start'ta bildirimden önce fallback prayer zamanı set edilmiş olabilir)
   useEffect(() => {
@@ -806,7 +879,7 @@ export default function App() {
 
     setActiveAlarm(prayer);
 
-    // Kilitli ekranda göster, ekranı aç, uyku modunu engelle
+    // Kilitli ekranda göster, ekranı aç (API 23+ destekleyen cihazlarda)
     if (Platform.OS === 'android') {
       NativeModules.AlarmWindow?.setFlags(true);
     }
@@ -865,7 +938,6 @@ export default function App() {
     const todayTracking = trackingDays.find((d) => d.date === today);
 
     if (trackingNotifMode === 'ifIncomplete') {
-      const prayerKeys = prayers.map((p) => p.key);
       const pastPrayerKeys = prayers
         .filter((p) => {
           const [h, m] = p.time.split(':').map(Number);
@@ -948,18 +1020,6 @@ export default function App() {
 
     try {
       setLoadingLocation(true);
-
-      const today = getTodayFromCache(cachedPrayerDays);
-
-      if (isOnline === false) {
-        if (today) {
-          const cachedPrayers = applyPrayerPrefs(today.prayers, getPrayerPrefs(prayers));
-          setPrayers(cachedPrayers);
-          await scheduleLocalPrayerNotifications(cachedPrayers, undefined, cachedPrayerDays);
-        }
-
-        return;
-      }
 
       const perm = await Location.requestForegroundPermissionsAsync();
 
@@ -1050,18 +1110,18 @@ export default function App() {
       for (const cachedDay of daysToSchedule) {
         const dayPrayers = applyPrayerPrefs(cachedDay.prayers, prefs);
         for (const prayer of dayPrayers) {
-          const [hour, minute] = prayer.time.split(':').map(Number);
+          const [hour, minute, second = 0] = prayer.time.split(':').map(Number);
           const [yr, mo, dy] = cachedDay.date.split('-').map(Number);
-          const triggerDate = new Date(yr, mo - 1, dy, hour, minute, 0, 0);
+          const triggerDate = new Date(yr, mo - 1, dy, hour, minute, second, 0);
           if (triggerDate > now) toSchedule.push({ triggerDate, prayer });
         }
       }
     } else {
       // Önbellek yoksa sadece bir sonraki vakti planla
       for (const prayer of times) {
-        const [hour, minute] = prayer.time.split(':').map(Number);
+        const [hour, minute, second = 0] = prayer.time.split(':').map(Number);
         const triggerDate = new Date();
-        triggerDate.setHours(hour, minute, 0, 0);
+        triggerDate.setHours(hour, minute, second, 0);
         if (triggerDate <= now) triggerDate.setDate(triggerDate.getDate() + 1);
         toSchedule.push({ triggerDate, prayer });
       }
@@ -1699,7 +1759,7 @@ function AboutScreen({
             {upper(t.architecture, language)}
           </Text>
 
-          {['React Native', 'Expo', 'Geolocation API', 'Local Notifications', 'Theme / Language Layer'].map((item) => (
+          {['React Native', 'Expo', 'adhan (local prayer calc)', 'Local Notifications', 'Theme / Language Layer'].map((item) => (
             <View key={item} style={styles.techRow}>
               <MaterialCommunityIcons name="check" size={21} color={colors.primary} />
               <Text style={styles.bodyText}>{item}</Text>
@@ -2054,12 +2114,19 @@ function LinkButton({
   );
 }
 
-function Scanlines({ styles }: { styles: ReturnType<typeof createAppStyles> }) {
+const Scanlines = React.memo(function Scanlines({ styles }: { styles: ReturnType<typeof createAppStyles> }) {
   return (
     <View pointerEvents="none" style={styles.scanlineWrap}>
       {Array.from({ length: 260 }).map((_, i) => (
         <View key={i} style={[styles.scanline, { top: i * 4 }]} />
       ))}
     </View>
+  );
+});
+export default function RootApp() {
+  return (
+    <AppErrorBoundary>
+      <App />
+    </AppErrorBoundary>
   );
 }
