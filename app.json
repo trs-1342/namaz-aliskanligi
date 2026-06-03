@@ -2,7 +2,7 @@
   "expo": {
     "name": "Namaz Alışkanlığı",
     "slug": "namaz-aliskanligi",
-    "version": "1.3.3",
+    "version": "1.3.4",
     "orientation": "portrait",
     "scheme": "namaz-aliskanligi",
     "userInterfaceStyle": "automatic",
