@@ -549,5 +549,261 @@ export function createAppStyles(
       fontSize: 13,
       letterSpacing: 1.8,
     },
+
+    // Onboarding
+    obContainer: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 32,
+      paddingVertical: 48,
+      gap: 12,
+    },
+
+    obDots: {
+      flexDirection: 'row',
+      gap: 8,
+      marginBottom: 16,
+    },
+
+    obDot: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+      backgroundColor: 'rgba(154,143,128,0.35)',
+    },
+
+    obDotActive: {
+      backgroundColor: colors.primaryContainer,
+      width: 24,
+    },
+
+    obIcon: {
+      marginBottom: 8,
+    },
+
+    obTitle: {
+      fontFamily: font.serif,
+      color: colors.primary,
+      fontSize: 28,
+      letterSpacing: 1.5,
+      textAlign: 'center',
+    },
+
+    obDesc: {
+      fontFamily: font.inter,
+      color: colors.onSurfaceVariant,
+      fontSize: 15,
+      lineHeight: 23,
+      textAlign: 'center',
+      marginBottom: 8,
+    },
+
+    obPrimaryButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 10,
+      backgroundColor: colors.primaryContainer,
+      borderRadius: 4,
+      paddingVertical: 16,
+      paddingHorizontal: 28,
+      width: '100%',
+      marginTop: 8,
+    },
+
+    obPrimaryText: {
+      fontFamily: font.interSemi,
+      color: colors.onPrimary,
+      fontSize: 14,
+      letterSpacing: 1.4,
+    },
+
+    obOrText: {
+      fontFamily: font.inter,
+      color: colors.onSurfaceVariant,
+      fontSize: 12,
+      letterSpacing: 0.5,
+      marginTop: 4,
+      marginBottom: 4,
+    },
+
+    obSuccessRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      marginTop: 4,
+    },
+
+    obSuccessText: {
+      fontFamily: font.interSemi,
+      fontSize: 13,
+      letterSpacing: 0.6,
+    },
+
+    obFooter: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      width: '100%',
+      marginTop: 24,
+    },
+
+    obSkipButton: {
+      paddingVertical: 10,
+      paddingHorizontal: 4,
+    },
+
+    obSkipText: {
+      fontFamily: font.inter,
+      color: colors.onSurfaceVariant,
+      fontSize: 14,
+      letterSpacing: 0.3,
+    },
+
+    obNextButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      backgroundColor: colors.primaryContainer,
+      borderRadius: 4,
+      paddingVertical: 10,
+      paddingHorizontal: 16,
+    },
+
+    obNextText: {
+      fontFamily: font.interSemi,
+      color: colors.onPrimary,
+      fontSize: 13,
+      letterSpacing: 1.1,
+    },
+
+    // Manuel konum girişi
+    manualInputWrap: {
+      width: '100%',
+      gap: 10,
+    },
+
+    locationInput: {
+      width: '100%',
+      borderWidth: 1,
+      borderRadius: 4,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      fontFamily: font.inter,
+      fontSize: 14,
+      backgroundColor: 'transparent',
+    },
+
+    locationFeedback: {
+      fontFamily: font.inter,
+      fontSize: 12,
+      lineHeight: 18,
+    },
+
+    // Tehlikeli işlem satırı (Tüm verileri sıfırla)
+    dangerRow: {
+      minHeight: 44,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+    },
+
+    dangerText: {
+      fontFamily: font.interSemi,
+      color: colors.danger,
+      fontSize: 14,
+      letterSpacing: 0.3,
+    },
+
+    // İl/ilçe seçici alan (dokununca modal açar)
+    pickerField: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      borderWidth: 1,
+      borderColor: 'rgba(154,143,128,0.35)',
+      borderRadius: 4,
+      paddingHorizontal: 14,
+      paddingVertical: 13,
+      backgroundColor: colors.surfaceContainer,
+    },
+
+    pickerFieldText: {
+      flex: 1,
+      fontFamily: font.inter,
+      color: colors.onSurface,
+      fontSize: 14,
+    },
+
+    // Seçici modal
+    pickerBackdrop: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.5)',
+      justifyContent: 'flex-end',
+    },
+
+    pickerSheet: {
+      maxHeight: '82%',
+      minHeight: '55%',
+      backgroundColor: colors.background,
+      borderTopLeftRadius: 12,
+      borderTopRightRadius: 12,
+      borderWidth: 1,
+      borderColor: 'rgba(154,143,128,0.25)',
+      paddingHorizontal: 18,
+      paddingTop: 16,
+      paddingBottom: 8,
+    },
+
+    pickerHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: 12,
+    },
+
+    pickerTitle: {
+      fontFamily: font.serif,
+      color: colors.primary,
+      fontSize: 20,
+      letterSpacing: 1,
+    },
+
+    pickerSearch: {
+      borderWidth: 1,
+      borderRadius: 4,
+      paddingHorizontal: 14,
+      paddingVertical: 11,
+      fontFamily: font.inter,
+      fontSize: 15,
+      marginBottom: 10,
+    },
+
+    pickerCenter: {
+      paddingVertical: 32,
+      alignItems: 'center',
+      gap: 10,
+    },
+
+    pickerHint: {
+      fontFamily: font.inter,
+      color: colors.onSurfaceVariant,
+      fontSize: 13,
+      textAlign: 'center',
+    },
+
+    pickerItem: {
+      paddingVertical: 14,
+      paddingHorizontal: 4,
+      borderBottomWidth: 1,
+      borderBottomColor: 'rgba(154,143,128,0.12)',
+    },
+
+    pickerItemText: {
+      fontFamily: font.inter,
+      color: colors.onSurface,
+      fontSize: 15,
+    },
   });
 }

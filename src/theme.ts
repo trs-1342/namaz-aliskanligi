@@ -21,6 +21,7 @@ export const themes = {
     panel: 'rgba(26,28,28,0.92)',
     panelActive: 'rgba(197,160,89,0.11)',
     scanline: 'rgba(226,226,226,0.055)',
+    danger: '#e06a5a',
   },
   light: {
     surface: '#f5f1ea',
@@ -44,6 +45,7 @@ export const themes = {
     panel: 'rgba(232,225,214,0.92)',
     panelActive: 'rgba(197,160,89,0.18)',
     scanline: 'rgba(18,20,20,0.045)',
+    danger: '#b3261e',
   },
 };
 

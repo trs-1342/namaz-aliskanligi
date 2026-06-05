@@ -4,7 +4,11 @@ import {
   Alert,
   Animated,
   Appearance,
+  BackHandler,
+  FlatList,
+  KeyboardAvoidingView,
   Linking,
+  Modal,
   PanResponder,
   Platform,
   Pressable,
@@ -12,6 +16,7 @@ import {
   StyleProp,
   Switch,
   Text,
+  TextInput,
   View,
   ViewStyle,
   Vibration,
@@ -43,15 +48,25 @@ import {
   fetchMonthlyPrayerCalendar,
   PrayerTime,
 } from './src/services/prayerTimes';
+import {
+  DiyanetPlace,
+  fetchCities,
+  fetchDistricts,
+  fetchDiyanetCalendar,
+  normalizeTr,
+  resolveDistrictId,
+} from './src/services/diyanetTimes';
 import { formatClock, getLocalDateKey, getCurrentPrayer, getNextPrayer } from './src/utils/time';
+import { exportJson, exportHtml, pickAndReadBackup, restoreBackup, BackupError, BackupFile } from './src/services/backup';
 import { TrackingScreen, TRACKING_DICTS } from './src/tracking/TrackingScreen';
 import { DayTracking, PrayerStatus, TrackingNotifMode } from './src/tracking/types';
-import { loadTrackingDays, saveTrackingDays, upsertDayStatus } from './src/tracking/storage';
+import { clearTrackingDays, loadTrackingDays, saveTrackingDays, upsertDayStatus } from './src/tracking/storage';
 
 type Screen = 'home' | 'about' | 'tracking';
 type Language = 'tr' | 'en' | 'ar';
 type ThemePreference = 'system' | ThemeMode;
 type TimeFormat = 'system' | '24' | '12';
+type LocationMode = 'auto' | 'manual';
 type SnoozeMap = Record<string, number>;
 type PrayerToggleField = 'notification' | 'vibration' | 'alarm';
 
@@ -70,6 +85,8 @@ type PrayerPrefs = Record<
   }
 >;
 
+type LocationLabel = { city: string; district: string };
+
 type StoredAppState = {
   language: Language;
   themePreference: ThemePreference;
@@ -78,6 +95,15 @@ type StoredAppState = {
   disableVibration: boolean;
   disableAlarm: boolean;
   locationEnabled: boolean;
+  locationMode: LocationMode;
+  locationLabel: LocationLabel | null;
+  manualLocation: LocationLabel | null;
+  diyanetCityId: string | null;
+  diyanetDistrictId: string | null;
+  earlyReminderMinutes: number;
+  fridayReminderEnabled: boolean;
+  fridayReminderTime: string; // "HH:MM"
+  onboardingCompleted: boolean;
   coords: { latitude: number; longitude: number } | null;
   prayerPrefs: PrayerPrefs;
   snoozedUntilByKey: SnoozeMap;
@@ -88,6 +114,7 @@ type StoredAppState = {
 };
 
 const STORAGE_KEY = 'namaz-aliskanligi:v1';
+const APP_VERSION = '1.3.6';
 
 const DICTS = {
   tr: {
@@ -111,6 +138,69 @@ const DICTS = {
     disableVibration: 'Titreşimleri Kapat',
     disableAlarm: 'Alarmları Kapat',
     disableLocation: 'Konumu Çekmeyi Kapat',
+    resetData: 'Tüm Verileri Sıfırla',
+    resetDataConfirmTitle: 'Tüm veriler silinsin mi?',
+    resetDataConfirmBody:
+      'Konum, ayarlar, namaz takibi ve tüm kayıtlar kalıcı olarak silinecek. Uygulama ilk açılıştaki haline dönecek.',
+    resetDataConfirmBtn: 'Sil',
+    dataBackup: 'Veri Yedekleme',
+    dataBackupDesc: 'Tüm ayarlarınızı ve namaz takip kayıtlarınızı bir dosyaya aktarın; cihaz değişiminde veya format sonrası geri yükleyin.',
+    exportJson: 'JSON Olarak Dışa Aktar',
+    exportHtml: 'HTML Rapor Olarak Dışa Aktar',
+    importData: 'Dosyadan İçe Aktar',
+    exportErrorTitle: 'Dışa aktarılamadı',
+    exportErrorBody: 'Yedek dosyası oluşturulurken bir sorun oluştu.',
+    shareUnavailable: 'Bu cihazda paylaşım kullanılamıyor.',
+    importConfirmTitle: 'Veriler geri yüklensin mi?',
+    importConfirmBody: 'Seçilen yedekteki veriler mevcut tüm ayarların ve kayıtların yerine geçecek. Bu işlem geri alınamaz.',
+    importConfirmBtn: 'Geri Yükle',
+    importDoneTitle: 'Geri yüklendi',
+    importDoneBody: 'Verileriniz yedekten başarıyla geri yüklendi.',
+    importErrorTitle: 'İçe aktarılamadı',
+    importErrorBody: 'Dosya okunamadı. Lütfen tekrar deneyin.',
+    importInvalidBody: 'Seçilen dosya geçerli bir yedek değil.',
+    cancel: 'İptal',
+    locationInfo: 'Konum Bilgisi',
+    locationCityDistrict: 'Şehir / İlçe',
+    locationCoords: 'Koordinatlar',
+    locationUnknown: 'Bilinmiyor',
+    locationModeLabel: 'Konum Modu',
+    locationModeAuto: 'Otomatik (GPS)',
+    locationModeManual: 'Manuel',
+    locationRefresh: 'Yenile',
+    locationSet: 'Konum belirlendi',
+    locationGeoError: 'Konum bulunamadı. İl ve ilçe adlarını kontrol edin.',
+    selectCity: 'İl Seç',
+    selectDistrict: 'İlçe Seç',
+    searchPlaceholder: 'Ara...',
+    noResults: 'Sonuç bulunamadı',
+    loadingList: 'Yükleniyor...',
+    listError: 'Liste alınamadı. İnternet bağlantınızı kontrol edin.',
+    earlyReminder: 'Erken Hatırlatma',
+    earlyReminderOff: 'Tam vaktinde',
+    minutesShort: 'dk',
+    fridayReminder: 'Cuma Hatırlatması',
+    fridayReminderTimeLabel: 'Hatırlatma Saati',
+    fridayReminderTitle: 'Cuma Namazı',
+    fridayReminderBody: 'Bugün cuma — cuma namazını unutma.',
+    onboarding: {
+      locationTitle: 'Konumunuz',
+      locationDesc: 'Namaz vakitlerini doğru hesaplamak için konumunuzu belirleyin.',
+      allowGps: 'GPS ile Konum Al',
+      manualOr: 'veya manuel girin',
+      cityPlaceholder: 'İl (örn. İstanbul)',
+      districtPlaceholder: 'İlçe (örn. Kadıköy)',
+      applyManual: 'Uygula',
+      notifTitle: 'Bildirimler',
+      notifDesc: 'Namaz vakitlerini kaçırmamak için bildirim izni gerekiyor.',
+      allowNotif: 'Bildirimlere İzin Ver',
+      welcomeTitle: 'Hazırsınız!',
+      welcomeDesc: 'Kurulum tamamlandı. Namaz vakitlerini takip etmeye başlayabilirsiniz.',
+      start: 'Başla',
+      skip: 'Atla',
+      next: 'Devam',
+      of: '/ 3',
+    },
     aboutApp: 'Uygulama Hakkında',
     aboutText:
       'Namaz Alışkanlığı, namaz vakitlerini sade, net ve dikkat dağıtmayan bir arayüzle hatırlatmak için tasarlanmıştır. Amaç; bildirim, titreşim ve alarm geri bildirimlerini kişisel tercihe göre çalıştırarak namazı unutmamayı kolaylaştırmaktır.',
@@ -130,6 +220,7 @@ const DICTS = {
     contactIntro: 'İletişim ve geri bildirim için:',
     contributeText: 'Katkıda bulunmak, geliştirmeye destek olmak veya projeyi incelemek isteyenler kaynak koda göz atabilir.',
     sourceCodeLabel: 'namaz-aliskanligi (kaynak kod)',
+    website: 'Gizlilik Politikası & Kaynak Kod',
     trackPrayers: 'Namazımı Takip Et',
     trackPrayersDesc: 'Günlük namaz durumunu kaydet',
     trackingNotif: 'Takip Bildirimi',
@@ -179,6 +270,69 @@ const DICTS = {
     disableVibration: 'Disable Vibrations',
     disableAlarm: 'Disable Alarms',
     disableLocation: 'Disable Location Sync',
+    resetData: 'Reset All Data',
+    resetDataConfirmTitle: 'Delete all data?',
+    resetDataConfirmBody:
+      'Location, settings, prayer tracking and all records will be permanently deleted. The app will return to its initial state.',
+    resetDataConfirmBtn: 'Delete',
+    dataBackup: 'Data Backup',
+    dataBackupDesc: 'Export all your settings and prayer tracking records to a file; restore after a device change or factory reset.',
+    exportJson: 'Export as JSON',
+    exportHtml: 'Export as HTML Report',
+    importData: 'Import from File',
+    exportErrorTitle: 'Export failed',
+    exportErrorBody: 'Something went wrong while creating the backup file.',
+    shareUnavailable: 'Sharing is not available on this device.',
+    importConfirmTitle: 'Restore data?',
+    importConfirmBody: 'Data from the selected backup will replace all current settings and records. This cannot be undone.',
+    importConfirmBtn: 'Restore',
+    importDoneTitle: 'Restored',
+    importDoneBody: 'Your data has been restored from the backup successfully.',
+    importErrorTitle: 'Import failed',
+    importErrorBody: 'The file could not be read. Please try again.',
+    importInvalidBody: 'The selected file is not a valid backup.',
+    cancel: 'Cancel',
+    locationInfo: 'Location Info',
+    locationCityDistrict: 'City / District',
+    locationCoords: 'Coordinates',
+    locationUnknown: 'Unknown',
+    locationModeLabel: 'Location Mode',
+    locationModeAuto: 'Automatic (GPS)',
+    locationModeManual: 'Manual',
+    locationRefresh: 'Refresh',
+    locationSet: 'Location set',
+    locationGeoError: 'Location not found. Check city and district names.',
+    selectCity: 'Select City',
+    selectDistrict: 'Select District',
+    searchPlaceholder: 'Search...',
+    noResults: 'No results',
+    loadingList: 'Loading...',
+    listError: 'Could not load list. Check your internet connection.',
+    earlyReminder: 'Early Reminder',
+    earlyReminderOff: 'On time',
+    minutesShort: 'min',
+    fridayReminder: 'Friday Reminder',
+    fridayReminderTimeLabel: 'Reminder Time',
+    fridayReminderTitle: 'Friday Prayer',
+    fridayReminderBody: "It's Friday — don't forget the Jumu'ah prayer.",
+    onboarding: {
+      locationTitle: 'Your Location',
+      locationDesc: 'Set your location to calculate accurate prayer times.',
+      allowGps: 'Use GPS Location',
+      manualOr: 'or enter manually',
+      cityPlaceholder: 'City (e.g. Istanbul)',
+      districtPlaceholder: 'District (e.g. Kadikoy)',
+      applyManual: 'Apply',
+      notifTitle: 'Notifications',
+      notifDesc: 'Allow notifications so you never miss a prayer time.',
+      allowNotif: 'Allow Notifications',
+      welcomeTitle: "You're all set!",
+      welcomeDesc: 'Setup complete. Start tracking your prayer times.',
+      start: 'Start',
+      skip: 'Skip',
+      next: 'Next',
+      of: '/ 3',
+    },
     aboutApp: 'About App',
     aboutText:
       'Prayer Habit is designed to remind prayer times through a calm, focused and distraction-free interface. Its purpose is to provide notification, vibration and alarm feedback based on personal preference.',
@@ -198,6 +352,7 @@ const DICTS = {
     contactIntro: 'For contact and feedback:',
     contributeText: 'Anyone who wants to contribute, support development, or explore the project is welcome to check out the source code.',
     sourceCodeLabel: 'namaz-aliskanligi (source code)',
+    website: 'Privacy Policy & Source Code',
     trackPrayers: 'Track My Prayers',
     trackPrayersDesc: 'Record your daily prayer status',
     trackingNotif: 'Tracking Notification',
@@ -247,6 +402,69 @@ const DICTS = {
     disableVibration: 'إيقاف الاهتزاز',
     disableAlarm: 'إيقاف المنبهات',
     disableLocation: 'إيقاف سحب الموقع',
+    resetData: 'إعادة تعيين كل البيانات',
+    resetDataConfirmTitle: 'حذف جميع البيانات؟',
+    resetDataConfirmBody:
+      'سيتم حذف الموقع والإعدادات وتتبع الصلاة وجميع السجلات نهائياً. سيعود التطبيق إلى حالته الأولى.',
+    resetDataConfirmBtn: 'حذف',
+    dataBackup: 'نسخ البيانات',
+    dataBackupDesc: 'صدّر جميع إعداداتك وسجلات تتبع الصلاة إلى ملف؛ واستعدها بعد تغيير الجهاز أو إعادة الضبط.',
+    exportJson: 'تصدير كـ JSON',
+    exportHtml: 'تصدير كتقرير HTML',
+    importData: 'استيراد من ملف',
+    exportErrorTitle: 'فشل التصدير',
+    exportErrorBody: 'حدثت مشكلة أثناء إنشاء ملف النسخة الاحتياطية.',
+    shareUnavailable: 'المشاركة غير متاحة على هذا الجهاز.',
+    importConfirmTitle: 'استعادة البيانات؟',
+    importConfirmBody: 'ستحل بيانات النسخة المختارة محل جميع الإعدادات والسجلات الحالية. لا يمكن التراجع عن ذلك.',
+    importConfirmBtn: 'استعادة',
+    importDoneTitle: 'تمت الاستعادة',
+    importDoneBody: 'تمت استعادة بياناتك من النسخة الاحتياطية بنجاح.',
+    importErrorTitle: 'فشل الاستيراد',
+    importErrorBody: 'تعذر قراءة الملف. حاول مرة أخرى.',
+    importInvalidBody: 'الملف المختار ليس نسخة احتياطية صالحة.',
+    cancel: 'إلغاء',
+    locationInfo: 'معلومات الموقع',
+    locationCityDistrict: 'المدينة / الحي',
+    locationCoords: 'الإحداثيات',
+    locationUnknown: 'غير معروف',
+    locationModeLabel: 'وضع الموقع',
+    locationModeAuto: 'تلقائي (GPS)',
+    locationModeManual: 'يدوي',
+    locationRefresh: 'تحديث',
+    locationSet: 'تم تحديد الموقع',
+    locationGeoError: 'لم يتم العثور على الموقع. تحقق من اسم المدينة والحي.',
+    selectCity: 'اختر المدينة',
+    selectDistrict: 'اختر الحي',
+    searchPlaceholder: 'بحث...',
+    noResults: 'لا توجد نتائج',
+    loadingList: 'جار التحميل...',
+    listError: 'تعذر تحميل القائمة. تحقق من اتصال الإنترنت.',
+    earlyReminder: 'تذكير مسبق',
+    earlyReminderOff: 'في الوقت',
+    minutesShort: 'د',
+    fridayReminder: 'تذكير الجمعة',
+    fridayReminderTimeLabel: 'وقت التذكير',
+    fridayReminderTitle: 'صلاة الجمعة',
+    fridayReminderBody: 'اليوم الجمعة — لا تنسَ صلاة الجمعة.',
+    onboarding: {
+      locationTitle: 'موقعك',
+      locationDesc: 'حدد موقعك لحساب أوقات الصلاة بدقة.',
+      allowGps: 'استخدام GPS',
+      manualOr: 'أو أدخل يدوياً',
+      cityPlaceholder: 'المحافظة (مثل: إسطنبول)',
+      districtPlaceholder: 'الحي (مثل: كاديكوي)',
+      applyManual: 'تطبيق',
+      notifTitle: 'الإشعارات',
+      notifDesc: 'اسمح بالإشعارات حتى لا تفوتك أوقات الصلاة.',
+      allowNotif: 'السماح بالإشعارات',
+      welcomeTitle: 'أنت جاهز!',
+      welcomeDesc: 'اكتمل الإعداد. ابدأ متابعة أوقات الصلاة.',
+      start: 'ابدأ',
+      skip: 'تخطى',
+      next: 'التالي',
+      of: '/ 3',
+    },
     aboutApp: 'حول التطبيق',
     aboutText:
       'تطبيق عادة الصلاة مصمم لتذكيرك بأوقات الصلاة من خلال واجهة هادئة وواضحة بلا تشتيت، مع إمكانية التحكم في الإشعارات والاهتزاز والمنبه لكل صلاة.',
@@ -266,6 +484,7 @@ const DICTS = {
     contactIntro: 'للتواصل وإرسال الملاحظات:',
     contributeText: 'من يرغب في المساهمة أو دعم التطوير أو استعراض المشروع يمكنه الاطلاع على الكود المصدري.',
     sourceCodeLabel: 'namaz-aliskanligi (الكود المصدري)',
+    website: 'سياسة الخصوصية والكود المصدري',
     trackPrayers: 'تتبع صلواتي',
     trackPrayersDesc: 'سجّل حالة صلواتك اليومية',
     trackingNotif: 'إشعار التتبع',
@@ -335,6 +554,13 @@ function detectDeviceLanguage(): Language {
 function getPrayerLabel(key: string, language: Language) {
   const prayers = DICTS[language].prayers as Record<string, string>;
   return prayers[key] ?? key;
+}
+
+// Erken hatırlatma bildirim metni ("X dakika sonra ... vakti")
+function buildEarlyBody(language: Language, prayerLabel: string, minutes: number): string {
+  if (language === 'en') return `${prayerLabel} in ${minutes} minutes`;
+  if (language === 'ar') return `${prayerLabel} بعد ${toArabicDigits(String(minutes))} دقيقة`;
+  return `${minutes} dakika sonra ${prayerLabel} vakti`;
 }
 
 function upper(value: string, language: Language) {
@@ -536,10 +762,23 @@ function App() {
   const [trackingNotifMode, setTrackingNotifMode] = useState<TrackingNotifMode>('always');
   const [trackingDays, setTrackingDays] = useState<DayTracking[]>([]);
 
+  const [onboardingCompleted, setOnboardingCompleted] = useState(false);
+  const [onboardingPage, setOnboardingPage] = useState(1);
+  const [locationMode, setLocationMode] = useState<LocationMode>('auto');
+  const [locationLabel, setLocationLabel] = useState<LocationLabel | null>(null);
+  const [manualLocation, setManualLocation] = useState<LocationLabel | null>(null);
+  const [diyanetCityId, setDiyanetCityId] = useState<string | null>(null);
+  const [diyanetDistrictId, setDiyanetDistrictId] = useState<string | null>(null);
+  const [earlyReminderMinutes, setEarlyReminderMinutes] = useState(0);
+  const [fridayReminderEnabled, setFridayReminderEnabled] = useState(true);
+  const [fridayReminderTime, setFridayReminderTime] = useState('11:00');
+
   const alarmIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const alarmPlayerRef = useRef<any>(null);
   const hasRequestedLocationRef = useRef(false);
   const scheduledPrayerIdsRef = useRef<string[]>([]);
+  // Planlama çağrılarını seri hale getirmek için promise zinciri (yarış koşulu önler)
+  const schedulingChainRef = useRef<Promise<void>>(Promise.resolve());
   const themeMode: ThemeMode = themePreference === 'system' ? deviceScheme : themePreference;
   const t = DICTS[language];
 
@@ -594,53 +833,56 @@ function App() {
     };
   }, []);
 
+  // Depodaki durumu React state'ine uygular. Hem açılış hidrasyonunda hem de
+  // yedekten içe aktarma sonrasında kullanılır.
+  function applyStored(stored: Partial<StoredAppState>) {
+    const nextPrefs = stored.prayerPrefs ?? getPrayerPrefs(fallbackPrayers);
+    const nextCache = stored.cachedPrayerDays ?? [];
+
+    setLanguage(stored.language ?? detectDeviceLanguage());
+    setThemePreference(stored.themePreference ?? 'system');
+    setTimeFormat(stored.timeFormat ?? 'system');
+    setMuteAll(stored.muteAll ?? false);
+    setDisableVibration(stored.disableVibration ?? false);
+    setDisableAlarm(stored.disableAlarm ?? false);
+    setLocationEnabled(stored.locationEnabled ?? true);
+    setCoords(stored.coords ?? null);
+    setCachedPrayerDays(nextCache);
+    setSnoozedUntilByKey(removeExpiredSnoozes(stored.snoozedUntilByKey ?? {}));
+
+    scheduledPrayerIdsRef.current = stored.scheduledPrayerNotificationIds ?? [];
+
+    setTrackingEnabled(stored.trackingEnabled ?? false);
+    setTrackingNotifMode(stored.trackingNotifMode ?? 'always');
+
+    setLocationMode(stored.locationMode ?? 'auto');
+    setLocationLabel(stored.locationLabel ?? null);
+    setManualLocation(stored.manualLocation ?? null);
+    setDiyanetCityId(stored.diyanetCityId ?? null);
+    setDiyanetDistrictId(stored.diyanetDistrictId ?? null);
+    setEarlyReminderMinutes(stored.earlyReminderMinutes ?? 0);
+    setFridayReminderEnabled(stored.fridayReminderEnabled ?? true);
+    setFridayReminderTime(stored.fridayReminderTime ?? '11:00');
+
+    // Onboarding bayrağı önceliklidir. Bayrak yoksa (eski sürümden güncelleyen
+    // kullanıcılar) ve zaten verisi varsa, onları tekrar karşılama ekranına
+    // düşürmemek için tamamlanmış say. Yeni/sıfırlanmış kurulumda bayrak da
+    // veri de yok → karşılama ekranı gösterilir.
+    const hasExistingData = stored.coords != null || (stored.cachedPrayerDays?.length ?? 0) > 0;
+    setOnboardingCompleted(stored.onboardingCompleted ?? hasExistingData);
+
+    const today = getTodayFromCache(nextCache);
+    setPrayers(applyPrayerPrefs(today ? today.prayers : fallbackPrayers, nextPrefs));
+  }
+
   useEffect(() => {
     loadStoredState().then((stored) => {
-      if (!stored) {
-        setHydrated(true);
-        return;
-      }
-
-      const nextLanguage = stored.language ?? detectDeviceLanguage();
-      const nextTheme = stored.themePreference ?? 'system';
-      const nextTimeFormat = stored.timeFormat ?? 'system';
-      const nextMuteAll = stored.muteAll ?? false;
-      const nextDisableVibration = stored.disableVibration ?? false;
-      const nextDisableAlarm = stored.disableAlarm ?? false;
-      const nextLocationEnabled = stored.locationEnabled ?? true;
-      const nextCoords = stored.coords ?? null;
-      const nextCache = stored.cachedPrayerDays ?? [];
-      const nextPrefs = stored.prayerPrefs ?? getPrayerPrefs(fallbackPrayers);
-      const nextSnoozes = removeExpiredSnoozes(stored.snoozedUntilByKey ?? {});
-
-      setLanguage(nextLanguage);
-      setThemePreference(nextTheme);
-      setTimeFormat(nextTimeFormat);
-      setMuteAll(nextMuteAll);
-      setDisableVibration(nextDisableVibration);
-      setDisableAlarm(nextDisableAlarm);
-      setLocationEnabled(nextLocationEnabled);
-      setCoords(nextCoords);
-      setCachedPrayerDays(nextCache);
-      setSnoozedUntilByKey(nextSnoozes);
-
-      scheduledPrayerIdsRef.current = stored.scheduledPrayerNotificationIds ?? [];
-
-      setTrackingEnabled(stored.trackingEnabled ?? false);
-      setTrackingNotifMode(stored.trackingNotifMode ?? 'always');
-
-      const today = getTodayFromCache(nextCache);
-
-      if (today) {
-        setPrayers(applyPrayerPrefs(today.prayers, nextPrefs));
-      } else {
-        setPrayers(applyPrayerPrefs(fallbackPrayers, nextPrefs));
-      }
-
+      if (stored) applyStored(stored);
       setHydrated(true);
     });
 
     loadTrackingDays().then(setTrackingDays);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -654,6 +896,15 @@ function App() {
       disableVibration,
       disableAlarm,
       locationEnabled,
+      locationMode,
+      locationLabel,
+      manualLocation,
+      diyanetCityId,
+      diyanetDistrictId,
+      earlyReminderMinutes,
+      fridayReminderEnabled,
+      fridayReminderTime,
+      onboardingCompleted,
       coords,
       prayerPrefs: getPrayerPrefs(prayers),
       snoozedUntilByKey,
@@ -671,6 +922,15 @@ function App() {
     disableVibration,
     disableAlarm,
     locationEnabled,
+    locationMode,
+    locationLabel,
+    manualLocation,
+    diyanetCityId,
+    diyanetDistrictId,
+    earlyReminderMinutes,
+    fridayReminderEnabled,
+    fridayReminderTime,
+    onboardingCompleted,
     coords,
     prayers,
     snoozedUntilByKey,
@@ -695,11 +955,29 @@ function App() {
   }, [hydrated, clock, cachedPrayerDays]);
 
   useEffect(() => {
-    if (hydrated && locationEnabled && !hasRequestedLocationRef.current) {
+    // Onboarding bitmeden otomatik konum isteme; karşılama ekranındaki GPS
+    // butonu bunu açıkça yönetir. Aksi halde izin diyaloğu karşılama ekranının
+    // arkasında beklenmedik şekilde açılır.
+    if (hydrated && onboardingCompleted && locationEnabled && !hasRequestedLocationRef.current) {
       hasRequestedLocationRef.current = true;
-      requestLocationAndSync(true);
+      // Manuel modda GPS isteme — kayıtlı Diyanet ilçesinin takvimini tazele.
+      // Otomatik modda konumu çek.
+      if (locationMode === 'manual' && diyanetDistrictId) {
+        refreshManualCalendar(diyanetDistrictId);
+      } else {
+        requestLocationAndSync(true);
+      }
     }
-  }, [hydrated, locationEnabled]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hydrated, onboardingCompleted, locationEnabled]);
+
+  // Cuma hatırlatmasını (haftalık tekrar) ayar/dil değiştikçe yeniden planla.
+  // onboardingCompleted'a da bağlı: izin onboarding sonrası verildiğinde tetiklenir.
+  useEffect(() => {
+    if (!hydrated || !onboardingCompleted) return;
+    scheduleFridayReminder(fridayReminderEnabled, fridayReminderTime, language).catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hydrated, onboardingCompleted, fridayReminderEnabled, fridayReminderTime, language]);
 
   // Hydration sonrası: activeAlarm'ı güncel prayer saatiyle senkronize et
   // (cold-start'ta bildirimden önce fallback prayer zamanı set edilmiş olabilir)
@@ -815,6 +1093,39 @@ function App() {
     return () => stopAlarm();
   }, []);
 
+  // Android donanım geri tuşu: Ayarlar/Takip ekranındayken uygulamadan çıkmak
+  // yerine ana ekrana dön. Açık modallar kendi onRequestClose'larıyla zaten
+  // kapanır (RN Modal geri tuşunu önce yakalar), bu yüzden burada sadece ekran
+  // navigasyonunu ele alıyoruz.
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+
+    const onBackPress = () => {
+      // Alarm çalıyorken geri tuşu uygulamayı kapatmasın
+      if (activeAlarm) return true;
+
+      // Karşılama ekranı: ilk sayfadaysa varsayılan (çıkış), değilse önceki sayfa
+      if (!onboardingCompleted) {
+        if (onboardingPage > 1) {
+          setOnboardingPage((p) => Math.max(1, p - 1));
+          return true;
+        }
+        return false;
+      }
+
+      // Ayarlar/Takip ekranındayken ana ekrana dön (uygulamadan çıkma)
+      if (screen !== 'home') {
+        setScreen('home');
+        return true;
+      }
+
+      return false; // ana ekran → varsayılan davranış (uygulamadan çık)
+    };
+
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    return () => sub.remove();
+  }, [screen, activeAlarm, onboardingCompleted, onboardingPage]);
+
   const currentPrayer = useMemo(() => getCurrentPrayer(prayers), [prayers, clock]);
   const nextPrayer = useMemo(() => getNextPrayer(prayers), [prayers, clock]);
   const prayerProgress = useMemo(() => getPrayerProgress(prayers), [prayers, clock]);
@@ -883,6 +1194,210 @@ function App() {
     });
   }
 
+  // Manuel mod: kullanıcı Diyanet şehir/ilçe seçicisinden seçti → IlceID ile takvim
+  async function handleSelectDistrict(city: DiyanetPlace, district: DiyanetPlace): Promise<boolean> {
+    try {
+      setLoadingLocation(true);
+      const cache = await fetchDiyanetCalendar(district.id);
+
+      setLocationMode('manual');
+      setDiyanetCityId(city.id);
+      setDiyanetDistrictId(district.id);
+      setLocationLabel({ city: city.name, district: district.name });
+      setManualLocation({ city: city.name, district: district.name });
+
+      // Koordinatları en iyi çabayla al (Ayarlar'da gösterim + adhan fallback için)
+      try {
+        const results = await Location.geocodeAsync(`${district.name}, ${city.name}, Türkiye`);
+        if (results && results.length > 0) {
+          setCoords({ latitude: results[0].latitude, longitude: results[0].longitude });
+        }
+      } catch {}
+
+      await applyCalendarAndSchedule(cache);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      setLoadingLocation(false);
+    }
+  }
+
+  function handleLocationModeChange(mode: LocationMode) {
+    setLocationMode(mode);
+    if (mode === 'auto') {
+      requestLocationAndSync(true);
+    }
+  }
+
+  function handleCompleteOnboarding() {
+    setOnboardingCompleted(true);
+  }
+
+  async function handleExportJson() {
+    try {
+      const shared = await exportJson(APP_VERSION, language);
+      if (!shared) Alert.alert(t.exportErrorTitle, t.shareUnavailable);
+    } catch {
+      Alert.alert(t.exportErrorTitle, t.exportErrorBody);
+    }
+  }
+
+  async function handleExportHtml() {
+    try {
+      const shared = await exportHtml(APP_VERSION, language);
+      if (!shared) Alert.alert(t.exportErrorTitle, t.shareUnavailable);
+    } catch {
+      Alert.alert(t.exportErrorTitle, t.exportErrorBody);
+    }
+  }
+
+  // İçe aktarma sonrası: konuma göre takvimi izin İSTEMEDEN tazeler (Diyanet ilçe
+  // ID'si varsa onunla, yoksa koordinatla yerel adhan) ve bildirimleri içe
+  // aktarılan tercih/dil/erken-hatırlatma ile yeniden planlar. Çevrimdışıysa
+  // yedekteki önbellek korunur.
+  async function reapplyAfterImport(stored: Partial<StoredAppState>) {
+    const prefs = stored.prayerPrefs ?? getPrayerPrefs(fallbackPrayers);
+    const lang = stored.language ?? language;
+    const early = stored.earlyReminderMinutes ?? 0;
+    let cache = stored.cachedPrayerDays ?? [];
+
+    try {
+      setLoadingLocation(true);
+      if (stored.diyanetDistrictId) {
+        cache = await fetchDiyanetCalendar(stored.diyanetDistrictId);
+      } else if (stored.coords) {
+        cache = await fetchMonthlyPrayerCalendar(stored.coords.latitude, stored.coords.longitude);
+      }
+    } catch {
+      // taze çekilemezse yedekteki önbellek kullanılmaya devam eder
+    } finally {
+      setLoadingLocation(false);
+    }
+
+    setCachedPrayerDays(cache);
+    const today = getTodayFromCache(cache);
+    const todayPrayers = applyPrayerPrefs(today ? today.prayers : fallbackPrayers, prefs);
+    setPrayers(todayPrayers);
+    await scheduleLocalPrayerNotifications(todayPrayers, { language: lang, earlyMinutes: early }, cache);
+
+    // Cuma hatırlatması da içe aktarmada cancelAll ile silindiği için yeniden kur
+    await scheduleFridayReminder(
+      stored.fridayReminderEnabled ?? true,
+      stored.fridayReminderTime ?? '11:00',
+      lang
+    );
+  }
+
+  async function handleImportData() {
+    let parsed: BackupFile | undefined;
+    try {
+      parsed = await pickAndReadBackup();
+    } catch (e) {
+      if (e instanceof BackupError && e.code === 'cancelled') return;
+      const invalid = e instanceof BackupError && e.code === 'invalid';
+      Alert.alert(t.importErrorTitle, invalid ? t.importInvalidBody : t.importErrorBody);
+      return;
+    }
+
+    const backup = parsed;
+    if (!backup) return;
+
+    Alert.alert(t.importConfirmTitle, t.importConfirmBody, [
+      { text: t.cancel, style: 'cancel' },
+      {
+        text: t.importConfirmBtn,
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            // 1) Çalan alarmı durdur, planlı bildirimleri tamamen iptal et
+            stopAlarm();
+            try {
+              await Notifications.cancelAllScheduledNotificationsAsync();
+            } catch {}
+            scheduledPrayerIdsRef.current = [];
+
+            // 2) Yedeği kalıcı depoya yaz, ardından state'e uygula
+            await restoreBackup(backup);
+            const stored = await loadStoredState();
+            if (stored) applyStored(stored);
+            setTrackingDays(await loadTrackingDays());
+
+            // 3) Otomatik konum tetiğini kilitle, ana ekrana dön
+            hasRequestedLocationRef.current = true;
+            setOnboardingPage(1);
+            setScreen('home');
+
+            // 4) Takvimi tazele (bayat yedek olabilir) ve bildirimleri yeniden
+            //    planla — izin İSTEMEDEN ve içe aktarılan tercihlerle.
+            await reapplyAfterImport(stored ?? {});
+
+            Alert.alert(t.importDoneTitle, t.importDoneBody);
+          } catch {
+            Alert.alert(t.importErrorTitle, t.importErrorBody);
+          }
+        },
+      },
+    ]);
+  }
+
+  function handleResetAllData() {
+    Alert.alert(t.resetDataConfirmTitle, t.resetDataConfirmBody, [
+      { text: t.cancel, style: 'cancel' },
+      {
+        text: t.resetDataConfirmBtn,
+        style: 'destructive',
+        onPress: async () => {
+          // 1) Çalan alarmı durdur, planlı bildirimleri iptal et
+          stopAlarm();
+          try {
+            await Notifications.cancelAllScheduledNotificationsAsync();
+          } catch {}
+          scheduledPrayerIdsRef.current = [];
+
+          // 2) Kalıcı depoyu temizle (ana state + namaz takibi)
+          try {
+            await AsyncStorage.removeItem(STORAGE_KEY);
+          } catch {}
+          await clearTrackingDays();
+
+          // 3) Tüm in-memory state'i ilk açılış değerlerine döndür
+          const deviceLang = detectDeviceLanguage();
+          setLanguage(deviceLang);
+          setThemePreference('system');
+          setTimeFormat('system');
+          setMuteAll(false);
+          setDisableVibration(false);
+          setDisableAlarm(false);
+          setLocationEnabled(true);
+          setLocationMode('auto');
+          setLocationLabel(null);
+          setManualLocation(null);
+          setDiyanetCityId(null);
+          setDiyanetDistrictId(null);
+          setEarlyReminderMinutes(0);
+          setFridayReminderEnabled(true);
+          setFridayReminderTime('11:00');
+          setCoords(null);
+          setCachedPrayerDays([]);
+          setPrayers(applyPrayerPrefs(fallbackPrayers, getPrayerPrefs(fallbackPrayers)));
+          setSnoozedUntilByKey({});
+          setTrackingEnabled(false);
+          setTrackingNotifMode('always');
+          setTrackingDays([]);
+
+          // 4) Konum isteğinin yeniden tetiklenebilmesi için kilidi aç
+          hasRequestedLocationRef.current = false;
+
+          // 5) Karşılama ekranını yeniden göster
+          setOnboardingPage(1);
+          setOnboardingCompleted(false);
+          setScreen('home');
+        },
+      },
+    ]);
+  }
+
   async function scheduleTrackingNotification(ishaTime: string) {
     if (!trackingEnabled) return;
 
@@ -940,6 +1455,7 @@ function App() {
         data: {
           prayerKey: prayer.key,
           isAlarm: true,
+          isSnooze: true,
         },
       },
       trigger: {
@@ -958,13 +1474,50 @@ function App() {
   }
 
   async function cancelPrayerNotifications() {
-    for (const id of scheduledPrayerIdsRef.current) {
-      try {
-        await Notifications.cancelScheduledNotificationAsync(id);
-      } catch {}
-    }
+    // Planlanmış namaz/takip bildirimlerini doğrudan OS kuyruğundan iptal et.
+    // Ref'e güvenmek yarış koşullarında eski (ve farklı dildeki) bildirimleri
+    // sızdırıp "hem Arapça hem İngilizce" gibi karışık bildirimlere yol açıyordu.
+    // Kullanıcının az önce kurduğu ertelemeler (isSnooze) korunur.
+    try {
+      const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+      for (const n of scheduled) {
+        const data = n.content.data as Record<string, unknown> | undefined;
+        const isPrayer = typeof data?.prayerKey === 'string';
+        const isTracking = data?.isTrackingReminder === true;
+        if ((isPrayer || isTracking) && data?.isSnooze !== true) {
+          try {
+            await Notifications.cancelScheduledNotificationAsync(n.identifier);
+          } catch {}
+        }
+      }
+    } catch {}
 
     scheduledPrayerIdsRef.current = [];
+  }
+
+  // Manuel modda açılışta: kayıtlı ilçenin Diyanet takvimini sessizce tazele.
+  // İnternet yoksa mevcut cache kullanılmaya devam eder.
+  async function refreshManualCalendar(districtId: string) {
+    try {
+      setLoadingLocation(true);
+      const cache = await fetchDiyanetCalendar(districtId);
+      await applyCalendarAndSchedule(cache);
+    } catch {
+      // sessiz: mevcut önbellek geçerli kalır
+    } finally {
+      setLoadingLocation(false);
+    }
+  }
+
+  // Taze takvimi state'e uygula ve bildirimleri planla (cache henüz state'e
+  // yazılmamış olabileceği için doğrudan geçiriyoruz)
+  async function applyCalendarAndSchedule(cache: CachedPrayerDay[]) {
+    setCachedPrayerDays(cache);
+    const today = getTodayFromCache(cache);
+    if (!today) return;
+    const todayPrayers = applyPrayerPrefs(today.prayers, getPrayerPrefs(prayers));
+    setPrayers(todayPrayers);
+    await scheduleLocalPrayerNotifications(todayPrayers, undefined, cache);
   }
 
   async function requestLocationAndSync(force = false) {
@@ -994,18 +1547,50 @@ function App() {
 
       setCoords(nextCoords);
 
-      const cache = await fetchMonthlyPrayerCalendar(nextCoords.latitude, nextCoords.longitude);
-      setCachedPrayerDays(cache);
-
-      const todayFromNewCache = getTodayFromCache(cache);
-      const prefs = getPrayerPrefs(prayers);
-
-      if (todayFromNewCache) {
-        const todayPrayers = applyPrayerPrefs(todayFromNewCache.prayers, prefs);
-        setPrayers(todayPrayers);
-        // Taze cache'i geç: state güncellemesi henüz sync değil
-        await scheduleLocalPrayerNotifications(todayPrayers, undefined, cache);
+      // Reverse geocoding: il/ilçe adlarını çöz
+      let cityName = '';
+      let districtName = '';
+      try {
+        const geocoded = await Location.reverseGeocodeAsync(nextCoords);
+        if (geocoded.length > 0) {
+          const g = geocoded[0];
+          cityName = g.region ?? g.city ?? g.subregion ?? '';
+          // İlçe için aday alanlar; il adıyla aynı olanı ELE ki cihaz sadece ili
+          // döndürdüğünde "İstanbul, İstanbul" gibi yanlış tekrar oluşmasın.
+          const cityKey = normalizeTr(cityName);
+          districtName =
+            [g.subregion, g.city, g.district].find(
+              (v): v is string => Boolean(v) && normalizeTr(v as string) !== cityKey
+            ) ?? '';
+        }
+      } catch {
+        // Reverse geocoding başarısız olsa da koordinatlar kaydedildi
       }
+
+      // 1) Önce Diyanet resmi verisi: il/ilçe → IlceID → aylık takvim
+      try {
+        const resolved = await resolveDistrictId(cityName, districtName);
+        if (resolved) {
+          const cache = await fetchDiyanetCalendar(resolved.districtId);
+          // İlçe gerçekten eşleşmediyse etiketi sadece il olarak göster.
+          setLocationLabel({
+            city: resolved.cityName,
+            district: resolved.matchedDistrict ? resolved.districtName : '',
+          });
+          setDiyanetCityId(resolved.cityId);
+          setDiyanetDistrictId(resolved.districtId);
+          await applyCalendarAndSchedule(cache);
+          return;
+        }
+      } catch {
+        // Diyanet başarısız → adhan'a düş
+      }
+
+      // 2) Fallback: adhan (offline yerel hesap)
+      if (cityName || districtName) setLocationLabel({ city: cityName, district: districtName });
+      setDiyanetDistrictId(null);
+      const cache = await fetchMonthlyPrayerCalendar(nextCoords.latitude, nextCoords.longitude);
+      await applyCalendarAndSchedule(cache);
     } catch {
       const today = getTodayFromCache(cachedPrayerDays);
 
@@ -1022,6 +1607,49 @@ function App() {
     }
   }
 
+  // Cuma hatırlatması: her cuma seçilen saatte tekrarlayan HAFTALIK bildirim.
+  // Namaz bildirimlerinden bağımsızdır; cancelPrayerNotifications onu silmez,
+  // bu yüzden burada kendi etiketiyle (isFridayReminder) ayrıca yönetilir.
+  async function scheduleFridayReminder(enabled: boolean, time: string, lang: Language) {
+    // Önce mevcut cuma hatırlatmalarını temizle (tekrar planlamadan önce)
+    try {
+      const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+      for (const n of scheduled) {
+        if ((n.content.data as any)?.isFridayReminder === true) {
+          await Notifications.cancelScheduledNotificationAsync(n.identifier);
+        }
+      }
+    } catch {}
+
+    if (!enabled) return;
+
+    // İzin YALNIZCA onboarding'de istenir; burada sadece kontrol ediyoruz.
+    const { status } = await Notifications.getPermissionsAsync();
+    if (status !== 'granted') return;
+
+    const [h, m] = time.split(':').map(Number);
+    if (Number.isNaN(h) || Number.isNaN(m)) return;
+
+    const dict = DICTS[lang];
+    try {
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: dict.fridayReminderTitle,
+          body: dict.fridayReminderBody,
+          sound: true,
+          data: { isFridayReminder: true },
+        },
+        trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
+          weekday: 6, // 1=Pazar … 6=Cuma
+          hour: h,
+          minute: m,
+          ...(Platform.OS === 'android' ? { channelId: 'default' } : {}),
+        },
+      });
+    } catch {}
+  }
+
   async function scheduleLocalPrayerNotifications(
     times: PrayerTime[],
     options?: {
@@ -1029,19 +1657,35 @@ function App() {
       disableVibration?: boolean;
       disableAlarm?: boolean;
       language?: Language;
+      earlyMinutes?: number;
     },
     cacheDays?: CachedPrayerDay[]
   ) {
-    const { status } = await Notifications.requestPermissionsAsync();
+    // Eşzamanlı planlama çağrılarını sıraya al. Aksi halde iki çağrı OS kuyruğunu
+    // aynı anda temizleyip planlayarak çift/karışık-dilli bildirimler bırakabiliyor.
+    const previousRun = schedulingChainRef.current;
+    let finishThisRun: () => void = () => {};
+    schedulingChainRef.current = new Promise<void>((resolve) => {
+      finishThisRun = resolve;
+    });
+    await previousRun;
 
-    if (status !== 'granted') return;
+    try {
+      // Bildirim izni YALNIZCA karşılama ekranındaki "İzin Ver" butonundan istenir.
+      // Burada sadece mevcut izni kontrol ediyoruz; izin yoksa sessizce çıkıyoruz
+      // (otomatik bir izin diyaloğu açılmaz).
+      const { status } = await Notifications.getPermissionsAsync();
 
-    await cancelPrayerNotifications();
+      if (status !== 'granted') return;
+
+      await cancelPrayerNotifications();
 
     const muted = options?.muteAll ?? muteAll;
     const vibrationDisabled = options?.disableVibration ?? disableVibration;
     const alarmDisabled = options?.disableAlarm ?? disableAlarm;
     const activeLanguage = options?.language ?? language;
+    const earlyMinutes = Math.max(0, options?.earlyMinutes ?? earlyReminderMinutes);
+    const earlyMs = earlyMinutes * 60 * 1000;
     const activeDict = DICTS[activeLanguage];
 
     if (muted) return;
@@ -1064,7 +1708,8 @@ function App() {
         for (const prayer of dayPrayers) {
           const [hour, minute, second = 0] = prayer.time.split(':').map(Number);
           const [yr, mo, dy] = cachedDay.date.split('-').map(Number);
-          const triggerDate = new Date(yr, mo - 1, dy, hour, minute, second, 0);
+          // Vakit zamanından erken hatırlatma kadar önceye kaydır
+          const triggerDate = new Date(new Date(yr, mo - 1, dy, hour, minute, second, 0).getTime() - earlyMs);
           if (triggerDate > now) toSchedule.push({ triggerDate, prayer });
         }
       }
@@ -1072,12 +1717,15 @@ function App() {
       // Önbellek yoksa sadece bir sonraki vakti planla
       for (const prayer of times) {
         const [hour, minute, second = 0] = prayer.time.split(':').map(Number);
-        const triggerDate = new Date();
-        triggerDate.setHours(hour, minute, second, 0);
+        const base = new Date();
+        base.setHours(hour, minute, second, 0);
+        const triggerDate = new Date(base.getTime() - earlyMs);
         if (triggerDate <= now) triggerDate.setDate(triggerDate.getDate() + 1);
         toSchedule.push({ triggerDate, prayer });
       }
     }
+
+    const isEarly = earlyMinutes > 0;
 
     for (const { triggerDate, prayer } of toSchedule) {
       const shouldNotify = prayer.notification;
@@ -1086,12 +1734,25 @@ function App() {
 
       if (!shouldNotify && !shouldVibrate && !shouldAlarm) continue;
 
+      const label = getPrayerLabel(prayer.key, activeLanguage);
+
+      // Erken hatırlatma açıksa metin "X dk sonra ... vakti" olur;
+      // değilse normal/alarm metni kullanılır
+      const title = isEarly
+        ? label
+        : shouldAlarm
+          ? `${label} ${activeDict.alarmNotificationTitle}`
+          : label;
+      const body = isEarly
+        ? buildEarlyBody(activeLanguage, label, earlyMinutes)
+        : shouldAlarm
+          ? activeDict.alarmNotificationBody
+          : activeDict.prayerNotificationBody;
+
       const id = await Notifications.scheduleNotificationAsync({
         content: {
-          title: shouldAlarm
-            ? `${getPrayerLabel(prayer.key, activeLanguage)} ${activeDict.alarmNotificationTitle}`
-            : getPrayerLabel(prayer.key, activeLanguage),
-          body: shouldAlarm ? activeDict.alarmNotificationBody : activeDict.prayerNotificationBody,
+          title,
+          body,
           sound: shouldAlarm || shouldNotify,
           data: {
             prayerKey: prayer.key,
@@ -1117,9 +1778,12 @@ function App() {
       scheduledPrayerNotificationIds: nextIds,
     }).catch(() => {});
 
-    const ishaEntry = times.find((p) => p.key === 'isha');
-    if (ishaEntry) {
-      scheduleTrackingNotification(ishaEntry.time).catch(() => {});
+      const ishaEntry = times.find((p) => p.key === 'isha');
+      if (ishaEntry) {
+        scheduleTrackingNotification(ishaEntry.time).catch(() => {});
+      }
+    } finally {
+      finishThisRun();
     }
   }
 
@@ -1189,12 +1853,50 @@ function App() {
     scheduleLocalPrayerNotifications(prayers, { language: nextLanguage }).catch(() => {});
   }
 
+  function handleEarlyReminderChange(minutes: number) {
+    setEarlyReminderMinutes(minutes);
+    scheduleLocalPrayerNotifications(prayers, { earlyMinutes: minutes }).catch(() => {});
+  }
+
   if (!fontsLoaded || !hydrated) {
     return (
       <SafeAreaProvider>
         <View style={styles.loader}>
           <ActivityIndicator color={appColors.primaryContainer} />
         </View>
+      </SafeAreaProvider>
+    );
+  }
+
+  if (!onboardingCompleted) {
+    return (
+      <SafeAreaProvider>
+        <SafeAreaView style={styles.root} edges={['top', 'left', 'right']}>
+          <ExpoStatusBar style={themeMode === 'dark' ? 'light' : 'dark'} />
+          <Scanlines styles={styles} />
+          <OnboardingScreen
+            page={onboardingPage}
+            t={t}
+            language={language}
+            coords={coords}
+            locationLabel={locationLabel}
+            loadingLocation={loadingLocation}
+            colors={appColors}
+            styles={styles}
+            shadow={appShadow}
+            onRequestGps={() => requestLocationAndSync(true)}
+            onSelectDistrict={handleSelectDistrict}
+            onNext={() => setOnboardingPage((p) => Math.min(p + 1, 3))}
+            onSkip={() => {
+              if (onboardingPage < 3) {
+                setOnboardingPage((p) => p + 1);
+              } else {
+                handleCompleteOnboarding();
+              }
+            }}
+            onComplete={handleCompleteOnboarding}
+          />
+        </SafeAreaView>
       </SafeAreaProvider>
     );
   }
@@ -1244,8 +1946,16 @@ function App() {
             disableVibration={disableVibration}
             disableAlarm={disableAlarm}
             locationEnabled={locationEnabled}
+            locationMode={locationMode}
+            locationLabel={locationLabel}
+            manualLocation={manualLocation}
+            coords={coords}
+            loadingLocation={loadingLocation}
             trackingEnabled={trackingEnabled}
             trackingNotifMode={trackingNotifMode}
+            earlyReminderMinutes={earlyReminderMinutes}
+            fridayReminderEnabled={fridayReminderEnabled}
+            fridayReminderTime={fridayReminderTime}
             colors={appColors}
             styles={styles}
             shadow={appShadow}
@@ -1254,11 +1964,21 @@ function App() {
             onToggleVibration={handleDisableVibration}
             onToggleAlarm={handleDisableAlarm}
             onToggleLocation={handleLocationEnabled}
+            onLocationModeChange={handleLocationModeChange}
+            onSelectDistrict={handleSelectDistrict}
+            onRefreshLocation={() => requestLocationAndSync(true)}
             onLanguageChange={handleLanguageChange}
             onThemePreferenceChange={setThemePreference}
             onTimeFormatChange={setTimeFormat}
             onToggleTracking={setTrackingEnabled}
             onTrackingNotifModeChange={setTrackingNotifMode}
+            onEarlyReminderChange={handleEarlyReminderChange}
+            onFridayReminderToggle={setFridayReminderEnabled}
+            onFridayReminderTimeChange={setFridayReminderTime}
+            onExportJson={handleExportJson}
+            onExportHtml={handleExportHtml}
+            onImportData={handleImportData}
+            onResetData={handleResetAllData}
           />
         )}
 
@@ -1520,6 +2240,11 @@ function AboutScreen({
   disableVibration,
   disableAlarm,
   locationEnabled,
+  locationMode,
+  locationLabel,
+  manualLocation,
+  coords,
+  loadingLocation,
   trackingEnabled,
   trackingNotifMode,
   colors,
@@ -1530,11 +2255,24 @@ function AboutScreen({
   onToggleVibration,
   onToggleAlarm,
   onToggleLocation,
+  onLocationModeChange,
+  onSelectDistrict,
+  onRefreshLocation,
   onLanguageChange,
   onThemePreferenceChange,
   onTimeFormatChange,
   onToggleTracking,
   onTrackingNotifModeChange,
+  earlyReminderMinutes,
+  onEarlyReminderChange,
+  fridayReminderEnabled,
+  fridayReminderTime,
+  onFridayReminderToggle,
+  onFridayReminderTimeChange,
+  onExportJson,
+  onExportHtml,
+  onImportData,
+  onResetData,
 }: {
   t: typeof DICTS.tr;
   language: Language;
@@ -1546,8 +2284,16 @@ function AboutScreen({
   disableVibration: boolean;
   disableAlarm: boolean;
   locationEnabled: boolean;
+  locationMode: LocationMode;
+  locationLabel: LocationLabel | null;
+  manualLocation: LocationLabel | null;
+  coords: { latitude: number; longitude: number } | null;
+  loadingLocation: boolean;
   trackingEnabled: boolean;
   trackingNotifMode: TrackingNotifMode;
+  earlyReminderMinutes: number;
+  fridayReminderEnabled: boolean;
+  fridayReminderTime: string;
   colors: AppColors;
   styles: ReturnType<typeof createAppStyles>;
   shadow: ReturnType<typeof createShadow>;
@@ -1556,11 +2302,21 @@ function AboutScreen({
   onToggleVibration: (value: boolean) => void;
   onToggleAlarm: (value: boolean) => void;
   onToggleLocation: (value: boolean) => void;
+  onLocationModeChange: (mode: LocationMode) => void;
+  onSelectDistrict: (city: DiyanetPlace, district: DiyanetPlace) => Promise<boolean>;
+  onRefreshLocation: () => void;
   onLanguageChange: (language: Language) => void;
   onThemePreferenceChange: (theme: ThemePreference) => void;
   onTimeFormatChange: (format: TimeFormat) => void;
   onToggleTracking: (value: boolean) => void;
   onTrackingNotifModeChange: (mode: TrackingNotifMode) => void;
+  onEarlyReminderChange: (minutes: number) => void;
+  onFridayReminderToggle: (value: boolean) => void;
+  onFridayReminderTimeChange: (time: string) => void;
+  onExportJson: () => void;
+  onExportHtml: () => void;
+  onImportData: () => void;
+  onResetData: () => void;
 }) {
   const themeOptions = [
     {
@@ -1594,6 +2350,74 @@ function AboutScreen({
             {upper(t.aboutApp, language)}
           </Text>
           <Text style={styles.bodyText}>{t.aboutText}</Text>
+        </Panel>
+
+        {/* Konum Bilgisi Paneli */}
+        <Panel style={styles.aboutCard} styles={styles} shadow={shadow}>
+          <Text style={styles.cardTitle}>
+            <MaterialCommunityIcons name="map-marker-outline" size={14} color={colors.primary} />{' '}
+            {upper(t.locationInfo, language)}
+          </Text>
+
+          <StatusRow
+            icon="city-variant-outline"
+            label={t.locationCityDistrict}
+            value={
+              locationLabel
+                ? [locationLabel.city, locationLabel.district].filter(Boolean).join(', ') || t.locationUnknown
+                : t.locationUnknown
+            }
+            colors={colors}
+            styles={styles}
+          />
+
+          {coords && (
+            <StatusRow
+              icon="crosshairs-gps"
+              label={t.locationCoords}
+              value={`${coords.latitude.toFixed(4)}, ${coords.longitude.toFixed(4)}`}
+              colors={colors}
+              styles={styles}
+            />
+          )}
+
+          <Divider styles={styles} />
+
+          <ChoiceRow
+            title={t.locationModeLabel}
+            options={[
+              { label: t.locationModeAuto, value: 'auto' },
+              { label: t.locationModeManual, value: 'manual' },
+            ]}
+            selected={locationMode}
+            colors={colors}
+            styles={styles}
+            onSelect={(value) => onLocationModeChange(value as LocationMode)}
+          />
+
+          {locationMode === 'auto' && (
+            <Pressable
+              style={styles.outlineButton}
+              onPress={onRefreshLocation}
+              disabled={loadingLocation}
+            >
+              <Text style={styles.outlineButtonText}>
+                {loadingLocation ? t.syncing : t.locationRefresh}
+              </Text>
+            </Pressable>
+          )}
+
+          {locationMode === 'manual' && (
+            <LocationPicker
+              t={t}
+              colors={colors}
+              styles={styles}
+              currentCity={manualLocation?.city ?? locationLabel?.city}
+              currentDistrict={manualLocation?.district ?? locationLabel?.district}
+              applying={loadingLocation}
+              onSelectDistrict={onSelectDistrict}
+            />
+          )}
         </Panel>
 
         <Panel style={styles.aboutCard} styles={styles} shadow={shadow}>
@@ -1650,6 +2474,41 @@ function AboutScreen({
             onValueChange={(value) => onToggleLocation(!value)}
           />
 
+          <ChoiceRow
+            title={t.earlyReminder}
+            options={[
+              { label: t.earlyReminderOff, value: '0' },
+              { label: `5 ${t.minutesShort}`, value: '5' },
+              { label: `10 ${t.minutesShort}`, value: '10' },
+              { label: `15 ${t.minutesShort}`, value: '15' },
+              { label: `30 ${t.minutesShort}`, value: '30' },
+            ]}
+            selected={String(earlyReminderMinutes)}
+            colors={colors}
+            styles={styles}
+            onSelect={(value) => onEarlyReminderChange(Number(value))}
+          />
+
+          <SettingRow
+            icon="calendar-star"
+            label={t.fridayReminder}
+            value={fridayReminderEnabled}
+            colors={colors}
+            styles={styles}
+            onValueChange={onFridayReminderToggle}
+          />
+
+          {fridayReminderEnabled && (
+            <ChoiceRow
+              title={t.fridayReminderTimeLabel}
+              options={['10:00', '10:30', '11:00', '11:30', '12:00'].map((v) => ({ label: v, value: v }))}
+              selected={fridayReminderTime}
+              colors={colors}
+              styles={styles}
+              onSelect={onFridayReminderTimeChange}
+            />
+          )}
+
           <Divider styles={styles} />
 
           <ChoiceRow
@@ -1703,6 +2562,49 @@ function AboutScreen({
               onSelect={(value) => onTrackingNotifModeChange(value as TrackingNotifMode)}
             />
           )}
+
+          <Divider styles={styles} />
+
+          <Pressable style={styles.dangerRow} onPress={onResetData}>
+            <MaterialCommunityIcons name="trash-can-outline" size={19} color={colors.danger} />
+            <Text style={styles.dangerText}>{t.resetData}</Text>
+          </Pressable>
+        </Panel>
+
+        {/* Veri Yedekleme: JSON / HTML dışa aktarma + geri yükleme */}
+        <Panel style={styles.aboutCard} styles={styles} shadow={shadow}>
+          <Text style={styles.cardTitle}>
+            <MaterialCommunityIcons name="content-save-outline" size={14} color={colors.primary} />{' '}
+            {upper(t.dataBackup, language)}
+          </Text>
+
+          <Text style={styles.bodyText}>{t.dataBackupDesc}</Text>
+
+          <Pressable
+            style={[styles.outlineButton, { marginTop: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }]}
+            onPress={onExportJson}
+          >
+            <MaterialCommunityIcons name="code-json" size={16} color={colors.primary} />
+            <Text style={styles.outlineButtonText}>{upper(t.exportJson, language)}</Text>
+          </Pressable>
+
+          <Pressable
+            style={[styles.outlineButton, { marginTop: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }]}
+            onPress={onExportHtml}
+          >
+            <MaterialCommunityIcons name="file-chart-outline" size={16} color={colors.primary} />
+            <Text style={styles.outlineButtonText}>{upper(t.exportHtml, language)}</Text>
+          </Pressable>
+
+          <Divider styles={styles} />
+
+          <Pressable
+            style={[styles.outlineButton, { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderColor: colors.primary }]}
+            onPress={onImportData}
+          >
+            <MaterialCommunityIcons name="tray-arrow-down" size={16} color={colors.primary} />
+            <Text style={styles.outlineButtonText}>{upper(t.importData, language)}</Text>
+          </Pressable>
         </Panel>
 
         <Panel style={styles.aboutCard} styles={styles} shadow={shadow}>
@@ -1746,6 +2648,10 @@ function AboutScreen({
 
           <View style={[styles.linkRow, { marginTop: 8 }]}>
             <LinkButton icon="source-repository" label={t.sourceCodeLabel} url="https://github.com/trs-1342/namaz-aliskanligi" colors={colors} styles={styles} />
+          </View>
+
+          <View style={[styles.linkRow, { marginTop: 8 }]}>
+            <LinkButton icon="shield-lock-outline" label={t.website} url="https://trs-1342.github.io/namaz-aliskanligi/" colors={colors} styles={styles} />
           </View>
         </Panel>
       </ScrollView>
@@ -1840,6 +2746,381 @@ function AlarmOverlay({
           </Pressable>
         </View>
       </View>
+    </View>
+  );
+}
+
+function OnboardingScreen({
+  page,
+  t,
+  language,
+  coords,
+  locationLabel,
+  loadingLocation,
+  colors,
+  styles,
+  shadow,
+  onRequestGps,
+  onSelectDistrict,
+  onNext,
+  onSkip,
+  onComplete,
+}: {
+  page: number;
+  t: typeof DICTS.tr;
+  language: Language;
+  coords: { latitude: number; longitude: number } | null;
+  locationLabel: LocationLabel | null;
+  loadingLocation: boolean;
+  colors: AppColors;
+  styles: ReturnType<typeof createAppStyles>;
+  shadow: ReturnType<typeof createShadow>;
+  onRequestGps: () => void;
+  onSelectDistrict: (city: DiyanetPlace, district: DiyanetPlace) => Promise<boolean>;
+  onNext: () => void;
+  onSkip: () => void;
+  onComplete: () => void;
+}) {
+  const ob = t.onboarding;
+
+  const dots = (
+    <View style={styles.obDots}>
+      {[1, 2, 3].map((n) => (
+        <View
+          key={n}
+          style={[styles.obDot, n === page && styles.obDotActive]}
+        />
+      ))}
+    </View>
+  );
+
+  if (page === 1) {
+    const locationSetLabel = locationLabel
+      ? [locationLabel.city, locationLabel.district].filter(Boolean).join(', ')
+      : null;
+
+    return (
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView contentContainerStyle={styles.obContainer} keyboardShouldPersistTaps="handled">
+          {dots}
+
+          <MaterialCommunityIcons name="map-marker-radius-outline" size={56} color={colors.primary} style={styles.obIcon} />
+          <Text style={styles.obTitle}>{upper(ob.locationTitle, language)}</Text>
+          <Text style={styles.obDesc}>{ob.locationDesc}</Text>
+
+          <Pressable
+            style={[styles.obPrimaryButton, loadingLocation && { opacity: 0.5 }]}
+            onPress={onRequestGps}
+            disabled={loadingLocation}
+          >
+            <MaterialCommunityIcons name="crosshairs-gps" size={18} color={colors.onPrimary} />
+            <Text style={styles.obPrimaryText}>{loadingLocation ? t.syncing : ob.allowGps}</Text>
+          </Pressable>
+
+          {locationSetLabel && (
+            <View style={styles.obSuccessRow}>
+              <MaterialCommunityIcons name="check-circle-outline" size={16} color={colors.primary} />
+              <Text style={[styles.obSuccessText, { color: colors.primary }]}>{locationSetLabel}</Text>
+            </View>
+          )}
+
+          <Text style={styles.obOrText}>{ob.manualOr}</Text>
+
+          <LocationPicker
+            t={t}
+            colors={colors}
+            styles={styles}
+            currentCity={locationLabel?.city}
+            currentDistrict={locationLabel?.district}
+            applying={loadingLocation}
+            onSelectDistrict={onSelectDistrict}
+          />
+
+          <View style={styles.obFooter}>
+            <Pressable onPress={onSkip} style={styles.obSkipButton}>
+              <Text style={styles.obSkipText}>{ob.skip}</Text>
+            </Pressable>
+            <Pressable onPress={onNext} style={styles.obNextButton}>
+              <Text style={styles.obNextText}>{ob.next}</Text>
+              <MaterialCommunityIcons name="arrow-right" size={16} color={colors.onPrimary} />
+            </Pressable>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    );
+  }
+
+  if (page === 2) {
+    return (
+      <View style={styles.obContainer}>
+        {dots}
+
+        <MaterialCommunityIcons name="bell-ring-outline" size={56} color={colors.primary} style={styles.obIcon} />
+        <Text style={styles.obTitle}>{upper(ob.notifTitle, language)}</Text>
+        <Text style={styles.obDesc}>{ob.notifDesc}</Text>
+
+        <Pressable
+          style={styles.obPrimaryButton}
+          onPress={async () => {
+            await Notifications.requestPermissionsAsync();
+            onNext();
+          }}
+        >
+          <MaterialCommunityIcons name="bell-check-outline" size={18} color={colors.onPrimary} />
+          <Text style={styles.obPrimaryText}>{ob.allowNotif}</Text>
+        </Pressable>
+
+        <View style={styles.obFooter}>
+          <Pressable onPress={onSkip} style={styles.obSkipButton}>
+            <Text style={styles.obSkipText}>{ob.skip}</Text>
+          </Pressable>
+          <Pressable onPress={onNext} style={styles.obNextButton}>
+            <Text style={styles.obNextText}>{ob.next}</Text>
+            <MaterialCommunityIcons name="arrow-right" size={16} color={colors.onPrimary} />
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
+  // Page 3 - Welcome
+  return (
+    <View style={styles.obContainer}>
+      {dots}
+
+      <MaterialCommunityIcons name="check-circle-outline" size={72} color={colors.primary} style={styles.obIcon} />
+      <Text style={styles.obTitle}>{upper(ob.welcomeTitle, language)}</Text>
+      <Text style={styles.obDesc}>{ob.welcomeDesc}</Text>
+
+      <Pressable style={[styles.obPrimaryButton, { marginTop: 24 }]} onPress={onComplete}>
+        <Text style={styles.obPrimaryText}>{ob.start}</Text>
+        <MaterialCommunityIcons name="arrow-right" size={18} color={colors.onPrimary} />
+      </Pressable>
+    </View>
+  );
+}
+
+// Aranabilir liste modalı (il/ilçe seçimi). Klavye açılınca KeyboardAvoidingView
+// + adjustResize sayesinde liste yukarı kayar, içerik klavye altında kalmaz.
+function PickerModal({
+  visible,
+  title,
+  items,
+  loading,
+  error,
+  t,
+  colors,
+  styles,
+  onSelect,
+  onClose,
+}: {
+  visible: boolean;
+  title: string;
+  items: DiyanetPlace[];
+  loading: boolean;
+  error: boolean;
+  t: typeof DICTS.tr;
+  colors: AppColors;
+  styles: ReturnType<typeof createAppStyles>;
+  onSelect: (item: DiyanetPlace) => void;
+  onClose: () => void;
+}) {
+  const [query, setQuery] = useState('');
+
+  const filtered = useMemo(() => {
+    const q = normalizeTr(query);
+    if (!q) return items;
+    return items.filter((it) => normalizeTr(it.name).includes(q));
+  }, [items, query]);
+
+  return (
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+      <View style={styles.pickerBackdrop}>
+        {/* Android'de manifest adjustResize klavyeyi yönetir; iOS'ta padding.
+            Liste FlatList olduğu için klavye üstünde kalan kısım kaydırılabilir. */}
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.pickerSheet}
+        >
+          <View style={styles.pickerHeader}>
+            <Text style={styles.pickerTitle}>{title}</Text>
+            <Pressable onPress={onClose} hitSlop={10}>
+              <MaterialCommunityIcons name="close" size={24} color={colors.onSurfaceVariant} />
+            </Pressable>
+          </View>
+
+          <TextInput
+            style={[styles.pickerSearch, { color: colors.onSurface, borderColor: 'rgba(154,143,128,0.35)' }]}
+            placeholder={t.searchPlaceholder}
+            placeholderTextColor={colors.onSurfaceVariant}
+            value={query}
+            onChangeText={setQuery}
+          />
+
+          {loading ? (
+            <View style={styles.pickerCenter}>
+              <ActivityIndicator color={colors.primaryContainer} />
+              <Text style={styles.pickerHint}>{t.loadingList}</Text>
+            </View>
+          ) : error ? (
+            <View style={styles.pickerCenter}>
+              <Text style={styles.pickerHint}>{t.listError}</Text>
+            </View>
+          ) : (
+            <FlatList
+              data={filtered}
+              keyExtractor={(it) => it.id}
+              keyboardShouldPersistTaps="handled"
+              initialNumToRender={20}
+              ListEmptyComponent={
+                <View style={styles.pickerCenter}>
+                  <Text style={styles.pickerHint}>{t.noResults}</Text>
+                </View>
+              }
+              renderItem={({ item }) => (
+                <Pressable style={styles.pickerItem} onPress={() => onSelect(item)}>
+                  <Text style={styles.pickerItemText}>{item.name}</Text>
+                </Pressable>
+              )}
+            />
+          )}
+        </KeyboardAvoidingView>
+      </View>
+    </Modal>
+  );
+}
+
+// İki adımlı Diyanet konum seçici (İl → İlçe). Hem onboarding hem ayarlarda kullanılır.
+function LocationPicker({
+  t,
+  colors,
+  styles,
+  currentCity,
+  currentDistrict,
+  applying,
+  onSelectDistrict,
+}: {
+  t: typeof DICTS.tr;
+  colors: AppColors;
+  styles: ReturnType<typeof createAppStyles>;
+  currentCity?: string;
+  currentDistrict?: string;
+  applying: boolean;
+  onSelectDistrict: (city: DiyanetPlace, district: DiyanetPlace) => Promise<boolean>;
+}) {
+  const [cities, setCities] = useState<DiyanetPlace[]>([]);
+  const [districts, setDistricts] = useState<DiyanetPlace[]>([]);
+  const [city, setCity] = useState<DiyanetPlace | null>(null);
+  const [districtName, setDistrictName] = useState<string | null>(null);
+
+  const [cityModal, setCityModal] = useState(false);
+  const [districtModal, setDistrictModal] = useState(false);
+  const [citiesLoading, setCitiesLoading] = useState(false);
+  const [districtsLoading, setDistrictsLoading] = useState(false);
+  const [citiesError, setCitiesError] = useState(false);
+  const [districtsError, setDistrictsError] = useState(false);
+  const [feedback, setFeedback] = useState<'ok' | 'err' | null>(null);
+
+  async function openCityModal() {
+    setCityModal(true);
+    if (cities.length === 0) {
+      setCitiesLoading(true);
+      setCitiesError(false);
+      try {
+        setCities(await fetchCities());
+      } catch {
+        setCitiesError(true);
+      } finally {
+        setCitiesLoading(false);
+      }
+    }
+  }
+
+  async function handleCity(c: DiyanetPlace) {
+    setCity(c);
+    setCityModal(false);
+    setDistrictName(null);
+    setFeedback(null);
+    setDistricts([]);
+    setDistrictsLoading(true);
+    setDistrictsError(false);
+    setDistrictModal(true);
+    try {
+      setDistricts(await fetchDistricts(c.id));
+    } catch {
+      setDistrictsError(true);
+    } finally {
+      setDistrictsLoading(false);
+    }
+  }
+
+  async function handleDistrict(d: DiyanetPlace) {
+    if (!city) return;
+    setDistrictModal(false);
+    setFeedback(null);
+    const ok = await onSelectDistrict(city, d);
+    if (ok) setDistrictName(d.name);
+    setFeedback(ok ? 'ok' : 'err');
+  }
+
+  const cityLabel = city?.name ?? currentCity ?? t.selectCity;
+  const districtLabel = districtName ?? (city ? t.selectDistrict : currentDistrict ?? t.selectDistrict);
+
+  return (
+    <View style={styles.manualInputWrap}>
+      <Pressable style={styles.pickerField} onPress={openCityModal} disabled={applying}>
+        <MaterialCommunityIcons name="city-variant-outline" size={18} color={colors.primary} />
+        <Text style={styles.pickerFieldText} numberOfLines={1}>{cityLabel}</Text>
+        <MaterialCommunityIcons name="chevron-down" size={20} color={colors.onSurfaceVariant} />
+      </Pressable>
+
+      <Pressable
+        style={[styles.pickerField, !city && { opacity: 0.5 }]}
+        onPress={() => city && setDistrictModal(true)}
+        disabled={!city || applying}
+      >
+        <MaterialCommunityIcons name="map-marker-outline" size={18} color={colors.primary} />
+        <Text style={styles.pickerFieldText} numberOfLines={1}>{districtLabel}</Text>
+        <MaterialCommunityIcons name="chevron-down" size={20} color={colors.onSurfaceVariant} />
+      </Pressable>
+
+      {applying && (
+        <View style={styles.obSuccessRow}>
+          <ActivityIndicator color={colors.primaryContainer} />
+          <Text style={[styles.locationFeedback, { color: colors.onSurfaceVariant }]}>{t.syncing}</Text>
+        </View>
+      )}
+      {!applying && feedback === 'ok' && (
+        <Text style={[styles.locationFeedback, { color: colors.primary }]}>{t.locationSet}</Text>
+      )}
+      {!applying && feedback === 'err' && (
+        <Text style={[styles.locationFeedback, { color: colors.danger }]}>{t.listError}</Text>
+      )}
+
+      <PickerModal
+        visible={cityModal}
+        title={t.selectCity}
+        items={cities}
+        loading={citiesLoading}
+        error={citiesError}
+        t={t}
+        colors={colors}
+        styles={styles}
+        onSelect={handleCity}
+        onClose={() => setCityModal(false)}
+      />
+      <PickerModal
+        visible={districtModal}
+        title={t.selectDistrict}
+        items={districts}
+        loading={districtsLoading}
+        error={districtsError}
+        t={t}
+        colors={colors}
+        styles={styles}
+        onSelect={handleDistrict}
+        onClose={() => setDistrictModal(false)}
+      />
     </View>
   );
 }

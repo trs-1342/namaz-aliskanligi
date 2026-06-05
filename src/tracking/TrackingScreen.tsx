@@ -35,6 +35,7 @@ type TrackingDict = {
   confirmYes: string;
   confirmNo: string;
   today: string;
+  goToday: string;
   yesterday: string;
   weekdays: string[];
   monthNames: string[];
@@ -62,6 +63,7 @@ export const TRACKING_DICTS: Record<Language, TrackingDict> = {
     confirmYes: 'Evet vallaha eminim',
     confirmNo: 'Hayır',
     today: 'Bugün',
+    goToday: 'Bugüne Dön',
     yesterday: 'Dün',
     weekdays: ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'],
     monthNames: ['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'],
@@ -93,6 +95,7 @@ export const TRACKING_DICTS: Record<Language, TrackingDict> = {
     confirmYes: 'Yes, I am sure',
     confirmNo: 'No',
     today: 'Today',
+    goToday: 'Go to Today',
     yesterday: 'Yesterday',
     weekdays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
     monthNames: ['January','February','March','April','May','June','July','August','September','October','November','December'],
@@ -124,6 +127,7 @@ export const TRACKING_DICTS: Record<Language, TrackingDict> = {
     confirmYes: 'نعم، أنا متأكد',
     confirmNo: 'لا',
     today: 'اليوم',
+    goToday: 'العودة إلى اليوم',
     yesterday: 'أمس',
     weekdays: ['الإث', 'الثل', 'الأر', 'الخم', 'الجم', 'السب', 'الأح'],
     monthNames: ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'],
@@ -163,6 +167,12 @@ function isYesterday(date: string): boolean {
 
 function isToday(date: string): boolean {
   return date === getLocalDateKey();
+}
+
+// Sadece bugün ve dün düzenlenebilir; daha eski günler salt-okunurdur.
+// (Engelleme navigasyon/ok mantığıyla değil, doğrudan tarihe göre yapılır.)
+function isEditable(date: string): boolean {
+  return isToday(date) || isYesterday(date);
 }
 
 function getPrayerSlotFlex(prayers: PrayerTime[]): number[] {
@@ -298,6 +308,13 @@ export function TrackingScreen({
   );
 
   function requestUpdate(date: string, key: string, status: PrayerStatus) {
+    // Tarih bazlı güvenlik: bugün/dün dışındaki günler düzenlenemez.
+    // (Haftalık/aylık görünümden eski bir güne gidilmiş olsa bile burada engellenir.)
+    if (!isEditable(date)) {
+      dismissSheet();
+      return;
+    }
+
     const prayerLabel = getPrayerLabel(key, language);
     const statusLabel =
       status === 'onTime' ? td.onTime
@@ -323,6 +340,18 @@ export function TrackingScreen({
 
   const currentStatuses = actionTarget ? getDayStatuses(actionTarget.date) : {};
   const currentActionStatus = actionTarget ? (currentStatuses[actionTarget.key] ?? null) : null;
+
+  // Görünüm "bugünü" gösteriyor mu? (günlük: bugün seçili, haftalık/aylık: ofset 0)
+  const isViewingToday =
+    (view === 'daily' && selectedDate === today) ||
+    (view === 'weekly' && weekOffset === 0) ||
+    (view === 'monthly' && monthOffset === 0);
+
+  function goToToday() {
+    setSelectedDate(today);
+    setWeekOffset(0);
+    setMonthOffset(0);
+  }
 
   return (
     <View style={styles.screen}>
@@ -356,6 +385,20 @@ export function TrackingScreen({
         })}
       </View>
 
+      {/* Bugünden uzaklaşıldığında hızlı dönüş butonu */}
+      {!isViewingToday && (
+        <Pressable
+          onPress={goToToday}
+          style={({ pressed }) => [
+            tS.todayChip,
+            { borderColor: colors.primaryContainer, backgroundColor: pressed ? colors.primaryContainer + '22' : 'transparent' },
+          ]}
+        >
+          <MaterialCommunityIcons name="calendar-today" size={15} color={colors.primary} />
+          <Text style={[tS.todayChipText, { color: colors.primary }]}>{td.goToday}</Text>
+        </Pressable>
+      )}
+
       {view === 'daily' && (
         <DailyView
           date={selectedDate}
@@ -367,7 +410,9 @@ export function TrackingScreen({
           prayers={getPrayersForDate(selectedDate)}
           statuses={getDayStatuses(selectedDate)}
           onDateChange={(d) => {
-            if (d <= today && d >= offsetDate(today, -1)) setSelectedDate(d);
+            // Geçmiş günler görüntülenebilir (gelecek hariç); düzenleme ayrıca
+            // tarih bazlı olarak isEditable ile kısıtlanır.
+            if (d <= today) setSelectedDate(d);
           }}
           onLongPress={(date, key) => setActionTarget({ date, key })}
           formatDate={(d) => formatDateDisplay(d, language, td)}
@@ -546,9 +591,10 @@ function DailyView({
   onLongPress: (date: string, key: string) => void;
   formatDate: (d: string) => string;
 }) {
-  const yesterday = offsetDate(today, -1);
-  const canGoBack = date === today;
-  const canGoForward = date === yesterday;
+  // Navigasyon serbest: geçmiş günler görüntülenebilir, geleceğe gidilemez.
+  // Düzenleme yetkisi ise tarihe göre ayrı olarak belirlenir.
+  const editable = isEditable(date);
+  const canGoForward = date < today;
 
   // Per-row scale animation on status change
   const rowAnims = useRef<Record<string, Animated.Value>>({});
@@ -577,15 +623,14 @@ function DailyView({
       {/* Date nav */}
       <View style={tS.dateNav}>
         <Pressable
-          onPress={() => canGoBack && onDateChange(yesterday)}
-          style={({ pressed }) => [tS.navArrow, (!canGoBack || pressed) && { opacity: 0.25 }]}
-          disabled={!canGoBack}
+          onPress={() => onDateChange(offsetDate(date, -1))}
+          style={({ pressed }) => [tS.navArrow, pressed && { opacity: 0.5 }]}
         >
           <MaterialCommunityIcons name="chevron-left" size={28} color={colors.primary} />
         </Pressable>
         <Text style={[tS.dateLabel, { color: colors.onSurface }]}>{formatDate(date)}</Text>
         <Pressable
-          onPress={() => canGoForward && onDateChange(today)}
+          onPress={() => canGoForward && onDateChange(offsetDate(date, 1))}
           style={({ pressed }) => [tS.navArrow, (!canGoForward || pressed) && { opacity: 0.25 }]}
           disabled={!canGoForward}
         >
@@ -605,8 +650,8 @@ function DailyView({
           return (
             <Animated.View key={prayer.key} style={{ transform: [{ scale: rowAnim }] }}>
               <TouchableOpacity
-                activeOpacity={past ? 0.65 : 1}
-                onLongPress={past ? () => onLongPress(date, prayer.key) : undefined}
+                activeOpacity={past && editable ? 0.65 : 1}
+                onLongPress={past && editable ? () => onLongPress(date, prayer.key) : undefined}
                 delayLongPress={280}
                 style={[
                   tS.dailyRow,
@@ -636,10 +681,13 @@ function DailyView({
                           {status === 'onTime' ? td.onTimeShort : status === 'late' ? td.lateShort : td.missedShort}
                         </Text>
                       </View>
-                    ) : (
+                    ) : editable ? (
                       <View style={[tS.statusBadge, { backgroundColor: colors.surfaceContainerHighest, borderColor: colors.outlineVariant + '55' }]}>
                         <MaterialCommunityIcons name="gesture-tap-hold" size={13} color={colors.onSurfaceVariant} />
                       </View>
+                    ) : (
+                      // Eski gün, durum yok: salt-okunur (düzenlenemez)
+                      <MaterialCommunityIcons name="lock-outline" size={16} color={colors.outlineVariant} />
                     )
                   ) : (
                     <MaterialCommunityIcons name="clock-outline" size={18} color={colors.outlineVariant} />
@@ -651,7 +699,7 @@ function DailyView({
         })}
       </View>
 
-      <Text style={[tS.hint, { color: colors.onSurfaceVariant }]}>{td.hint}</Text>
+      {editable && <Text style={[tS.hint, { color: colors.onSurfaceVariant }]}>{td.hint}</Text>}
     </ScrollView>
   );
 }
@@ -932,6 +980,25 @@ const tS = {
     width: 28,
     borderRadius: 1,
     marginTop: 6,
+  },
+
+  // "Bugüne Dön" chip'i
+  todayChip: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    alignSelf: 'center' as const,
+    gap: 6,
+    paddingVertical: 7,
+    paddingHorizontal: 15,
+    borderRadius: 999,
+    borderWidth: 1,
+    marginTop: 12,
+    marginBottom: 2,
+  },
+  todayChipText: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 12,
+    letterSpacing: 0.4,
   },
 
   // nav

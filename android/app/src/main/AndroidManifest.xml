@@ -1,17 +1,30 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
   <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
   <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
   <uses-permission android:name="android.permission.INTERNET"/>
   <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
   <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
-  <uses-permission android:name="android.permission.RECORD_AUDIO"/>
   <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
   <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
   <uses-permission android:name="android.permission.VIBRATE"/>
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
-  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>
+  <uses-permission android:name="android.permission.RECORD_AUDIO" tools:node="remove"/>
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" tools:node="remove"/>
+
+  <!-- Cihaz uyumluluğu: izinlerin Google Play tarafında "zorunlu donanım" olarak
+       yorumlanmasını engeller. Bu olmadan GPS'siz cihazlar (bazı tabletler, emülatör,
+       Chromebook) "Cihazınız bu sürümle uyumlu değil" hatası alır. Uygulama manuel
+       konum girişi de desteklediği için bu donanımların hiçbiri gerçekten zorunlu değil. -->
+  <uses-feature android:name="android.hardware.location" android:required="false"/>
+  <uses-feature android:name="android.hardware.location.gps" android:required="false"/>
+  <uses-feature android:name="android.hardware.location.network" android:required="false"/>
   <uses-feature android:name="android.hardware.microphone" android:required="false"/>
+  <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
+  <uses-feature android:name="android.hardware.telephony" android:required="false"/>
+  <uses-feature android:name="android.hardware.wifi" android:required="false"/>
+  <uses-feature android:name="android.hardware.audio.output" android:required="false"/>
+
   <queries>
     <intent>
       <action android:name="android.intent.action.VIEW"/>
@@ -36,5 +49,6 @@
         <data android:scheme="namaz-aliskanligi"/>
       </intent-filter>
     </activity>
+    <service android:name="expo.modules.audio.service.AudioRecordingService" tools:node="remove"/>
   </application>
 </manifest>

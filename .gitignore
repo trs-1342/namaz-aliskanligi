@@ -6,3 +6,4 @@ node_modules/
 .claude/
 !README.md
 *.md
+old_verions/

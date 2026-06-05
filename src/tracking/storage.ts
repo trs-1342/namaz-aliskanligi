@@ -18,6 +18,12 @@ export async function saveTrackingDays(days: DayTracking[]): Promise<void> {
   } catch {}
 }
 
+export async function clearTrackingDays(): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(KEY);
+  } catch {}
+}
+
 export function upsertDayStatus(
   days: DayTracking[],
   date: string,
