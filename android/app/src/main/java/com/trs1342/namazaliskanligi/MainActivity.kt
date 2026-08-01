@@ -2,6 +2,9 @@ package com.trs1342.namazaliskanligi
 
 import android.os.Build
 import android.os.Bundle
+import android.content.Context
+import android.app.KeyguardManager
+import android.view.WindowManager
 
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
@@ -11,6 +14,36 @@ import com.facebook.react.defaults.DefaultReactActivityDelegate
 import expo.modules.ReactActivityDelegateWrapper
 
 class MainActivity : ReactActivity() {
+  // @withAndroidAlarm-lockscreen-v2
+  private fun applyAlarmWindowFlags() {
+    val prefs = getSharedPreferences("AlarmWindow", Context.MODE_PRIVATE)
+    val active = prefs.getBoolean("alarmActive", false)
+    val firedAt = prefs.getLong("alarmFiredAt", 0L)
+    val recent = firedAt > 0L && System.currentTimeMillis() - firedAt < 90_000L
+    val show = active || recent
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+      setShowWhenLocked(show)
+      setTurnScreenOn(show)
+    }
+    @Suppress("DEPRECATION")
+    if (show) {
+      window.addFlags(
+        WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+          WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+          WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+      )
+    } else {
+      window.clearFlags(
+        WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+          WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+          WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+      )
+      val keyguard = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
+      if (keyguard.isKeyguardLocked) moveTaskToBack(true)
+    }
+  }
+
   override fun onCreate(savedInstanceState: Bundle?) {
     // Set the theme to AppTheme BEFORE onCreate to support
     // coloring the background, status bar, and navigation bar.
@@ -38,6 +71,16 @@ class MainActivity : ReactActivity() {
               mainComponentName,
               fabricEnabled
           ){})
+  }
+
+  override fun onStart() {
+    super.onStart()
+    applyAlarmWindowFlags()
+  }
+
+  override fun onResume() {
+    super.onResume()
+    applyAlarmWindowFlags()
   }
 
   /**

@@ -1,15 +1,21 @@
 {
   "name": "namaz-aliskanligi-rn",
-  "version": "1.1.1",
+  "version": "1.3.9",
   "private": true,
   "main": "index.ts",
   "scripts": {
+    "postinstall": "node scripts/patch-android-alarm.cjs",
     "start": "expo start --clear",
     "start:lan": "expo start --lan --clear",
     "start:tunnel": "expo start --tunnel --clear",
     "start:localhost": "expo start --localhost --clear",
     "android": "expo run:android",
     "ios": "expo run:ios",
+    "test": "node --experimental-strip-types src/services/backupFormat.test.ts && node --experimental-strip-types src/services/prayerTimes.test.ts && node --experimental-strip-types src/utils/time.test.ts && node --experimental-strip-types src/notifications/trackingSchedule.test.ts && node --experimental-strip-types src/services/locationDiagnosticsPolicy.test.ts",
+    "typecheck": "tsc --noEmit",
+    "audit:high": "npm audit --audit-level=high",
+    "check:version": "node scripts/check-version.cjs",
+    "check": "npm run check:version && npm run typecheck && npm test && npm run audit:high",
     "fix": "npx expo install --fix",
     "doctor": "npx expo-doctor@latest"
   },
@@ -22,8 +28,11 @@
     "@react-native-community/netinfo": "11.4.1",
     "adhan": "^4.4.3",
     "expo": "~54.0.35",
+    "expo-application": "~7.0.8",
     "expo-asset": "~12.0.8",
     "expo-audio": "~1.1.1",
+    "expo-crypto": "~15.0.9",
+    "expo-device": "~8.0.10",
     "expo-document-picker": "~14.0.8",
     "expo-file-system": "~19.0.23",
     "expo-font": "~14.0.12",
@@ -40,6 +49,11 @@
     "@expo/ngrok": "^4.1.3",
     "@types/react": "~19.1.10",
     "typescript": "~5.9.2"
+  },
+  "overrides": {
+    "postcss": "8.5.25",
+    "uuid": "11.1.1",
+    "ws": "8.21.1"
   },
   "expo": {
     "install": {

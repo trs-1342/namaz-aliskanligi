@@ -14,6 +14,8 @@ export type CachedPrayerDay = {
   prayers: PrayerTime[];
 };
 
+export type PrayerCalculationConvention = 'turkey' | 'umm-al-qura' | 'muslim-world-league';
+
 function pad2(n: number): string {
   return String(n).padStart(2, '0');
 }
@@ -33,9 +35,25 @@ function buildPrayers(pt: PrayerTimes): PrayerTime[] {
   ];
 }
 
-function calculate(latitude: number, longitude: number, date: Date): PrayerTime[] {
+export function resolveCalculationConvention(isoCountryCode?: string | null): PrayerCalculationConvention {
+  const country = isoCountryCode?.trim().toUpperCase();
+  if (country === 'TR') return 'turkey';
+  if (country === 'SA') return 'umm-al-qura';
+  return 'muslim-world-league';
+}
+
+function calculate(
+  latitude: number,
+  longitude: number,
+  date: Date,
+  convention: PrayerCalculationConvention
+): PrayerTime[] {
   const coords = new Coordinates(latitude, longitude);
-  const params = CalculationMethod.Turkey();
+  const params = convention === 'turkey'
+    ? CalculationMethod.Turkey()
+    : convention === 'umm-al-qura'
+      ? CalculationMethod.UmmAlQura()
+      : CalculationMethod.MuslimWorldLeague();
   params.rounding = Rounding.None;
   return buildPrayers(new PrayerTimes(coords, date, params));
 }
@@ -44,23 +62,34 @@ function getLocalDateKey(date = new Date()): string {
   return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
 }
 
-export function fetchPrayerTimes(latitude: number, longitude: number): Promise<PrayerTime[]> {
-  return Promise.resolve(calculate(latitude, longitude, new Date()));
+export function fetchPrayerTimes(
+  latitude: number,
+  longitude: number,
+  isoCountryCode?: string | null
+): Promise<PrayerTime[]> {
+  return Promise.resolve(calculate(
+    latitude,
+    longitude,
+    new Date(),
+    resolveCalculationConvention(isoCountryCode)
+  ));
 }
 
 export function fetchMonthlyPrayerCalendar(
   latitude: number,
   longitude: number,
-  startDate = new Date()
+  startDate = new Date(),
+  isoCountryCode?: string | null
 ): Promise<CachedPrayerDay[]> {
   const today = getLocalDateKey(startDate);
   const result: CachedPrayerDay[] = [];
+  const convention = resolveCalculationConvention(isoCountryCode);
 
   for (let i = 0; i < 35; i++) {
     const date = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate() + i);
     const dateKey = getLocalDateKey(date);
     if (dateKey < today) continue;
-    result.push({ date: dateKey, prayers: calculate(latitude, longitude, date) });
+    result.push({ date: dateKey, prayers: calculate(latitude, longitude, date, convention) });
     if (result.length >= 32) break;
   }
 

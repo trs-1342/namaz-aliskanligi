@@ -11,6 +11,7 @@ const { withAndroidManifest, withDangerousMod } = require('@expo/config-plugins'
 const { mergeContents } = require('@expo/config-plugins/build/utils/generateCode');
 const fs = require('fs');
 const path = require('path');
+const { patchExpoNotificationBuilder } = require('../scripts/patch-android-alarm.cjs');
 
 module.exports = function withAndroidAlarm(config) {
   config = addManifestFlags(config);
@@ -24,7 +25,14 @@ module.exports = function withAndroidAlarm(config) {
 
 function addManifestFlags(config) {
   return withAndroidManifest(config, (config) => {
+    const manifest = config.modResults.manifest;
     const app = config.modResults.manifest.application?.[0];
+    if (app?.$) app.$['android:allowBackup'] = 'false';
+
+    manifest['uses-permission'] = manifest['uses-permission'] ?? [];
+    if (!manifest['uses-permission'].some((p) => p.$?.['android:name'] === 'android.permission.USE_FULL_SCREEN_INTENT')) {
+      manifest['uses-permission'].push({ $: { 'android:name': 'android.permission.USE_FULL_SCREEN_INTENT' } });
+    }
     const main = app?.activity?.find((a) => a.$?.['android:name'] === '.MainActivity');
     if (main) {
       main.$['android:showWhenLocked'] = 'true';
@@ -248,50 +256,8 @@ function patchFullScreenIntent(config) {
         return config;
       }
 
-      let src = fs.readFileSync(builderPath, 'utf8');
-
-      if (src.includes('@withAndroidAlarm-fullscreen-v2')) return config;
-
-      // Eski patch varsa temizle; temiz EAS build'de zaten gerekmez ama lokal prebuild'i korur.
-      src = src.replace(
-        /\n    \/\/ @withAndroidAlarm: alarm bildirimleri için tam ekran & ekran uyandırma\n    if \(content\.body\?\.optBoolean\("isAlarm", false\) == true\) \{\n      builder\.setFullScreenIntent\(\n        createNotificationResponseIntent\(context, notification, defaultAction\),\n        true\n      \)\n    \}/,
-        ''
-      );
-
-      const target = `    builder.setContentIntent(
-      createNotificationResponseIntent(
-        context,
-        notification,
-        defaultAction
-      )
-    )`;
-
-      const insertion = `
-
-    // @withAndroidAlarm-fullscreen-v2
-    if (content.body?.optBoolean("isAlarm", false) == true) {
-      context.getSharedPreferences("AlarmWindow", Context.MODE_PRIVATE)
-        .edit()
-        .putBoolean("alarmActive", true)
-        .putLong("alarmFiredAt", System.currentTimeMillis())
-        .apply()
-
-      builder.setFullScreenIntent(
-        createNotificationResponseIntent(context, notification, defaultAction),
-        true
-      )
-    }`;
-
-      if (src.includes(target)) {
-        const patched = src.replace(target, target + insertion);
-        fs.writeFileSync(builderPath, patched, 'utf8');
-        console.log('[withAndroidAlarm] ✓ ExpoNotificationBuilder.kt — fullScreenIntent + alarm state eklendi.');
-      } else {
-        console.warn(
-          '[withAndroidAlarm] setContentIntent bloğu bulunamadı. ' +
-            'expo-notifications sürümü değişmiş olabilir. Elle kontrol edin.'
-        );
-      }
+      const changed = patchExpoNotificationBuilder(builderPath);
+      console.log(`[withAndroidAlarm] ExpoNotificationBuilder.kt ${changed ? 'güncellendi' : 'zaten güncel'}.`);
 
       return config;
     },

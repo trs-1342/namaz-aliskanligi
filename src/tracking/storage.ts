@@ -7,7 +7,8 @@ export async function loadTrackingDays(): Promise<DayTracking[]> {
   try {
     const raw = await AsyncStorage.getItem(KEY);
     return raw ? JSON.parse(raw) : [];
-  } catch {
+  } catch (e) {
+    console.warn('loadTrackingDays: okuma/ayrıştırma başarısız, boş liste dönülüyor', e);
     return [];
   }
 }
@@ -15,13 +16,19 @@ export async function loadTrackingDays(): Promise<DayTracking[]> {
 export async function saveTrackingDays(days: DayTracking[]): Promise<void> {
   try {
     await AsyncStorage.setItem(KEY, JSON.stringify(days));
-  } catch {}
+  } catch (e) {
+    console.warn('saveTrackingDays: yazım başarısız, değişiklik kalıcı olmadı', e);
+    throw e;
+  }
 }
 
 export async function clearTrackingDays(): Promise<void> {
   try {
     await AsyncStorage.removeItem(KEY);
-  } catch {}
+  } catch (e) {
+    console.warn('clearTrackingDays: silme başarısız', e);
+    throw e;
+  }
 }
 
 export function upsertDayStatus(

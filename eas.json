@@ -15,12 +15,27 @@
       }
     },
     "apk": {
+      "environment": "preview",
       "distribution": "internal",
+      "env": {
+        "NODE_ENV": "production"
+      },
       "android": {
         "buildType": "apk"
       }
     },
+    "aab": {
+      "environment": "production",
+      "distribution": "store",
+      "env": {
+        "NODE_ENV": "production"
+      },
+      "android": {
+        "buildType": "app-bundle"
+      }
+    },
     "production": {
+      "environment": "production",
       "autoIncrement": true,
       "env": {
         "NODE_ENV": "production"

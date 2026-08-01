@@ -377,10 +377,12 @@ export function createAppStyles(
       color: colors.onPrimary,
     },
 
-    techRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 10,
+    // Bir aç/kapat anahtarına ait alt seçenek (sol çizgi + girinti ile "ona ait" görünür)
+    nestedSetting: {
+      marginLeft: 14,
+      paddingLeft: 12,
+      borderLeftWidth: 2,
+      borderLeftColor: colors.primaryContainer,
     },
 
     devRow: {
@@ -619,15 +621,6 @@ export function createAppStyles(
       letterSpacing: 1.4,
     },
 
-    obOrText: {
-      fontFamily: font.inter,
-      color: colors.onSurfaceVariant,
-      fontSize: 12,
-      letterSpacing: 0.5,
-      marginTop: 4,
-      marginBottom: 4,
-    },
-
     obSuccessRow: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -678,29 +671,6 @@ export function createAppStyles(
       letterSpacing: 1.1,
     },
 
-    // Manuel konum girişi
-    manualInputWrap: {
-      width: '100%',
-      gap: 10,
-    },
-
-    locationInput: {
-      width: '100%',
-      borderWidth: 1,
-      borderRadius: 4,
-      paddingHorizontal: 14,
-      paddingVertical: 12,
-      fontFamily: font.inter,
-      fontSize: 14,
-      backgroundColor: 'transparent',
-    },
-
-    locationFeedback: {
-      fontFamily: font.inter,
-      fontSize: 12,
-      lineHeight: 18,
-    },
-
     // Tehlikeli işlem satırı (Tüm verileri sıfırla)
     dangerRow: {
       minHeight: 44,
@@ -716,94 +686,5 @@ export function createAppStyles(
       letterSpacing: 0.3,
     },
 
-    // İl/ilçe seçici alan (dokununca modal açar)
-    pickerField: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 10,
-      borderWidth: 1,
-      borderColor: 'rgba(154,143,128,0.35)',
-      borderRadius: 4,
-      paddingHorizontal: 14,
-      paddingVertical: 13,
-      backgroundColor: colors.surfaceContainer,
-    },
-
-    pickerFieldText: {
-      flex: 1,
-      fontFamily: font.inter,
-      color: colors.onSurface,
-      fontSize: 14,
-    },
-
-    // Seçici modal
-    pickerBackdrop: {
-      flex: 1,
-      backgroundColor: 'rgba(0,0,0,0.5)',
-      justifyContent: 'flex-end',
-    },
-
-    pickerSheet: {
-      maxHeight: '82%',
-      minHeight: '55%',
-      backgroundColor: colors.background,
-      borderTopLeftRadius: 12,
-      borderTopRightRadius: 12,
-      borderWidth: 1,
-      borderColor: 'rgba(154,143,128,0.25)',
-      paddingHorizontal: 18,
-      paddingTop: 16,
-      paddingBottom: 8,
-    },
-
-    pickerHeader: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      marginBottom: 12,
-    },
-
-    pickerTitle: {
-      fontFamily: font.serif,
-      color: colors.primary,
-      fontSize: 20,
-      letterSpacing: 1,
-    },
-
-    pickerSearch: {
-      borderWidth: 1,
-      borderRadius: 4,
-      paddingHorizontal: 14,
-      paddingVertical: 11,
-      fontFamily: font.inter,
-      fontSize: 15,
-      marginBottom: 10,
-    },
-
-    pickerCenter: {
-      paddingVertical: 32,
-      alignItems: 'center',
-      gap: 10,
-    },
-
-    pickerHint: {
-      fontFamily: font.inter,
-      color: colors.onSurfaceVariant,
-      fontSize: 13,
-      textAlign: 'center',
-    },
-
-    pickerItem: {
-      paddingVertical: 14,
-      paddingHorizontal: 4,
-      borderBottomWidth: 1,
-      borderBottomColor: 'rgba(154,143,128,0.12)',
-    },
-
-    pickerItemText: {
-      fontFamily: font.inter,
-      color: colors.onSurface,
-      fontSize: 15,
-    },
   });
 }

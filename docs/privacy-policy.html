@@ -28,18 +28,19 @@
   <!-- TÜRKÇE -->
   <div id="lang-tr" class="lang-content active">
     <h1>Gizlilik Politikası</h1>
-    <p><strong>Son güncelleme:</strong> 1 Haziran 2026</p>
+    <p><strong>Son güncelleme:</strong> 1 Ağustos 2026</p>
 
     <h2>Uygulama Hakkında</h2>
     <p>Namaz Alışkanlığı uygulaması, kullanıcıların namaz vakitlerini takip etmesine ve namaz alışkanlığı geliştirmesine yardımcı olan ücretsiz bir Android uygulamasıdır.</p>
 
     <h2>Toplanan Veriler</h2>
-    <p>Bu uygulama <strong>hiçbir kişisel veri toplamamakta, işlememekte veya üçüncü taraflarla paylaşmamaktadır.</strong></p>
+    <p>Namaz takibi ve ayarlar varsayılan olarak cihazda kalır. 3 Ağustos 2026 sonuna kadar süren kapalı testte kullanıcı ayrıca açık onay verirse geçici teknik doğrulama verisi toplanır.</p>
     <ul>
       <li>Kullanıcı hesabı oluşturulmaz</li>
-      <li>Konum verisi yalnızca namaz vakitlerini hesaplamak için kullanılır ve cihazda kalır, sunucuya gönderilmez</li>
-      <li>Kişisel bilgi girilmesi gerekmez</li>
-      <li>İnternet üzerinden veri gönderilmez</li>
+      <li>Onay veren testerde yalnız uygulama bir namaz bildirimini işlediğinde rastgele kurulum kimliği/test kodu, cihaz adı/modeli, uygulama/işletim sistemi sürümü, bildirim-planlama-yakalama-konum ölçüm zamanları, yakalama türü, enlem-boylam-doğruluk ve varsa rakım Supabase'e gönderilir</li>
+      <li>Veri yalnız bildirim ve konum tutarlılığını doğrulamak için kullanılır; reklam veya kullanıcı profilleme amacı yoktur</li>
+      <li>Katılım isteğe bağlıdır, ayarlardan kapatılabilir ve gönderim 3 Ağustos 2026 23:59:59 (Europe/Istanbul) sonrasında istemci ve veritabanı tarafından engellenir</li>
+      <li>Uygulama arka planda sürekli konum takibi yapmaz</li>
     </ul>
 
     <h2>Cihazda Saklanan Veriler</h2>
@@ -47,13 +48,13 @@
 
     <h2>İzinler</h2>
     <ul>
-      <li><strong>Konum izni:</strong> Bulunduğunuz konuma göre namaz vakitlerini hesaplamak için (veri cihazda kalır, paylaşılmaz)</li>
+      <li><strong>Konum izni:</strong> Canlı koordinata göre namaz vakitlerini hesaplamak ve yalnız ayrıca onaylanan geçici kapalı testte notification anını doğrulamak için</li>
       <li><strong>Bildirim izni:</strong> Namaz vakti hatırlatmalarını göstermek için</li>
       <li><strong>Alarm izni:</strong> Namaz vakti alarmlarını zamanında çalmak için</li>
     </ul>
 
     <h2>Üçüncü Taraf Hizmetler</h2>
-    <p>Uygulama herhangi bir reklam ağı, analitik servis veya üçüncü taraf SDK içermemektedir.</p>
+    <p>Geçici kapalı test kayıtları Supabase altyapısında tutulur. Tablo salt insert erişimlidir; uygulama kayıtları okuyamaz, değiştiremez veya silemez. Test sonrasında tablo silinir.</p>
 
     <h2>Değişiklikler</h2>
     <p>Bu gizlilik politikasında yapılacak değişiklikler bu sayfada yayınlanacaktır.</p>
@@ -65,18 +66,19 @@
   <!-- ENGLISH -->
   <div id="lang-en" class="lang-content">
     <h1>Privacy Policy</h1>
-    <p><strong>Last updated:</strong> June 1, 2026</p>
+    <p><strong>Last updated:</strong> August 1, 2026</p>
 
     <h2>About the App</h2>
     <p>Namaz Alışkanlığı (Prayer Habit) is a free Android application that helps users track prayer times and build a consistent prayer habit.</p>
 
     <h2>Data Collection</h2>
-    <p>This app <strong>does not collect, process, or share any personal data</strong> with third parties.</p>
+    <p>Prayer tracking and settings stay on-device by default. During a closed test ending August 3, 2026, temporary verification data is collected only after separate, explicit user consent.</p>
     <ul>
       <li>No user account is created</li>
-      <li>Location data is used only to calculate prayer times and stays on your device — it is never sent to any server</li>
-      <li>No personal information is required</li>
-      <li>No data is sent over the internet</li>
+      <li>Only when the app processes a prayer notification for a consenting tester, it sends a random installation ID/test code, device name/model, app/OS versions, notification/scheduled/capture/location-reading timestamps, capture mode, latitude/longitude/accuracy and altitude when available to Supabase</li>
+      <li>The data is used only to verify notification and location consistency; it is not used for advertising or profiling</li>
+      <li>Participation is optional, can be disabled in settings, and uploads are blocked by both the app and database after August 3, 2026 23:59:59 (Europe/Istanbul)</li>
+      <li>The app does not continuously track location in the background</li>
     </ul>
 
     <h2>Data Stored on Device</h2>
@@ -84,13 +86,13 @@
 
     <h2>Permissions</h2>
     <ul>
-      <li><strong>Location permission:</strong> To calculate prayer times based on your current location (data stays on device, never shared)</li>
+      <li><strong>Location permission:</strong> To calculate prayer times from live coordinates and, only in the separately accepted temporary closed test, verify the notification moment</li>
       <li><strong>Notification permission:</strong> To display prayer time reminders</li>
       <li><strong>Alarm permission:</strong> To trigger prayer time alarms on time</li>
     </ul>
 
     <h2>Third-Party Services</h2>
-    <p>The app does not include any ad networks, analytics services, or third-party SDKs.</p>
+    <p>Temporary closed-test records are stored on Supabase. The app has insert-only access and cannot read, update, or delete records. The table is removed after the test.</p>
 
     <h2>Changes</h2>
     <p>Any changes to this privacy policy will be published on this page.</p>
@@ -102,18 +104,19 @@
   <!-- ARABIC -->
   <div id="lang-ar" class="lang-content" dir="rtl">
     <h1>سياسة الخصوصية</h1>
-    <p><strong>آخر تحديث:</strong> 1 يونيو 2026</p>
+    <p><strong>آخر تحديث:</strong> 1 أغسطس 2026</p>
 
     <h2>حول التطبيق</h2>
     <p>تطبيق "نماز آلیشقانلیغی" (عادة الصلاة) هو تطبيق Android مجاني يساعد المستخدمين على تتبع أوقات الصلاة وتطوير عادة صلاة منتظمة.</p>
 
     <h2>البيانات المُجمَّعة</h2>
-    <p>هذا التطبيق <strong>لا يجمع أي بيانات شخصية ولا يعالجها ولا يشاركها</strong> مع أطراف ثالثة.</p>
+    <p>تبقى سجلات الصلاة والإعدادات على الجهاز افتراضيًا. خلال اختبار مغلق ينتهي في 3 أغسطس 2026، لا تُجمع بيانات التحقق المؤقتة إلا بعد موافقة صريحة ومنفصلة.</p>
     <ul>
       <li>لا يتم إنشاء حساب مستخدم</li>
-      <li>بيانات الموقع تُستخدم فقط لحساب أوقات الصلاة وتبقى على جهازك — لا تُرسل إلى أي خادم</li>
-      <li>لا يُطلب إدخال أي معلومات شخصية</li>
-      <li>لا يتم إرسال أي بيانات عبر الإنترنت</li>
+      <li>فقط عندما يعالج التطبيق إشعار صلاة لمختبِر موافق، يُرسل معرّف تثبيت/رمز اختبار عشوائي واسم/طراز الجهاز وإصدارات التطبيق/النظام وأوقات الإشعار والجدولة والالتقاط وقياس الموقع ونوع الالتقاط وخط العرض والطول والدقة والارتفاع إن توفر إلى Supabase</li>
+      <li>تُستخدم البيانات فقط للتحقق من اتساق الإشعارات والموقع، وليس للإعلانات أو إنشاء ملفات تعريف</li>
+      <li>المشاركة اختيارية ويمكن إيقافها من الإعدادات، ويُمنع الإرسال من التطبيق وقاعدة البيانات بعد 3 أغسطس 2026 الساعة 23:59:59 بتوقيت إسطنبول</li>
+      <li>لا يتتبع التطبيق الموقع باستمرار في الخلفية</li>
     </ul>
 
     <h2>البيانات المخزنة على الجهاز</h2>
@@ -121,13 +124,13 @@
 
     <h2>الأذونات</h2>
     <ul>
-      <li><strong>إذن الموقع:</strong> لحساب أوقات الصلاة بناءً على موقعك الحالي (تبقى البيانات على الجهاز ولا تُشارك)</li>
+      <li><strong>إذن الموقع:</strong> لحساب أوقات الصلاة من الإحداثيات الحية، وللتحقق من لحظة الإشعار فقط ضمن الاختبار المغلق المؤقت المقبول بشكل منفصل</li>
       <li><strong>إذن الإشعارات:</strong> لعرض تذكيرات أوقات الصلاة</li>
       <li><strong>إذن التنبيه:</strong> لتشغيل منبّه أوقات الصلاة في وقته</li>
     </ul>
 
     <h2>خدمات الطرف الثالث</h2>
-    <p>لا يحتوي التطبيق على أي شبكات إعلانية أو خدمات تحليلية أو SDKs تابعة لجهات خارجية.</p>
+    <p>تُخزن سجلات الاختبار المغلق المؤقت في Supabase. يملك التطبيق صلاحية الإدخال فقط ولا يستطيع قراءة السجلات أو تعديلها أو حذفها. يُحذف الجدول بعد الاختبار.</p>
 
     <h2>التغييرات</h2>
     <p>سيتم نشر أي تغييرات على سياسة الخصوصية في هذه الصفحة.</p>

@@ -254,12 +254,23 @@ export function TrackingScreen({
   onUpdateStatus: (date: string, key: string, status: PrayerStatus) => void;
 }) {
   const td = TRACKING_DICTS[language];
-  const today = useMemo(() => getLocalDateKey(), []);
-
+  const [today, setToday] = useState(() => getLocalDateKey());
   const [view, setView] = useState<TrackingView>('daily');
   const [selectedDate, setSelectedDate] = useState(today);
   const [monthOffset, setMonthOffset] = useState(0);
   const [weekOffset, setWeekOffset] = useState(0);
+
+  // Ekran gece yarısı açık kalırsa tarih sınırlarını ve navigasyonu yeni güne taşı.
+  useEffect(() => {
+    const now = new Date();
+    const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    const timer = setTimeout(() => {
+      const nextToday = getLocalDateKey();
+      setSelectedDate((date) => (date === today ? nextToday : date));
+      setToday(nextToday);
+    }, nextMidnight.getTime() - now.getTime() + 250);
+    return () => clearTimeout(timer);
+  }, [today]);
 
   type PendingAction = { date: string; key: string; status: PrayerStatus; prayerLabel: string; statusLabel: string };
   const [pending, setPending] = useState<PendingAction | null>(null);
@@ -332,10 +343,10 @@ export function TrackingScreen({
   }
 
   const statusOptions: { status: PrayerStatus; label: string; color: string; icon: keyof typeof MaterialCommunityIcons.glyphMap }[] = [
-    { status: 'onTime', label: td.onTime, color: STATUS_COLOR.onTime,        icon: 'check-circle-outline'  },
-    { status: 'late',   label: td.late,   color: STATUS_COLOR.late,           icon: 'clock-alert-outline'   },
-    { status: 'missed', label: td.missed, color: STATUS_COLOR.missed,         icon: 'close-circle-outline'  },
-    { status: null,     label: td.clearStatus, color: colors.onSurfaceVariant, icon: 'trash-can-outline'    },
+    { status: 'onTime', label: td.onTime, color: STATUS_COLOR.onTime,        icon: 'check-circle-outline' },
+    { status: 'late',   label: td.late,   color: STATUS_COLOR.late,          icon: 'clock-alert-outline'  },
+    { status: 'missed', label: td.missed, color: STATUS_COLOR.missed,        icon: 'close-circle-outline' },
+    { status: null,     label: td.clearStatus, color: colors.onSurfaceVariant, icon: 'trash-can-outline'  },
   ];
 
   const currentStatuses = actionTarget ? getDayStatuses(actionTarget.date) : {};

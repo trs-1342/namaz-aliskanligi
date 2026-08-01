@@ -43,6 +43,139 @@ export function buildBackup(
   };
 }
 
+// ─── Alan bazında katı doğrulama ─────────────────────────────────────────────
+// Bkz. PROJECT_ANALYSIS_REPORT.md BUG-01: üst düzey ("appState bir object mi")
+// kontrolü array/eksik-iç-alan gibi yanlış şekilleri geçirip kalıcı depoya
+// yazılmasına, ardından hydration'ın (ör. cachedPrayerDays.find üzerinden)
+// çökmesine ve uygulamanın her açılışta loader'da kilitlenmesine yol açıyordu.
+
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+function isFiniteNumber(v: unknown): v is number {
+  return typeof v === 'number' && Number.isFinite(v);
+}
+
+function isValidPrayerTime(v: unknown): boolean {
+  return (
+    isPlainObject(v) &&
+    typeof v.key === 'string' &&
+    typeof v.name === 'string' &&
+    typeof v.time === 'string' &&
+    TIME_RE.test(v.time) &&
+    typeof v.notification === 'boolean' &&
+    typeof v.vibration === 'boolean' &&
+    typeof v.alarm === 'boolean'
+  );
+}
+
+function isValidCachedPrayerDay(v: unknown): boolean {
+  return (
+    isPlainObject(v) &&
+    typeof v.date === 'string' &&
+    DATE_RE.test(v.date) &&
+    Array.isArray(v.prayers) &&
+    v.prayers.every(isValidPrayerTime)
+  );
+}
+
+function isValidCoords(v: unknown): boolean {
+  return (
+    v === null ||
+    (isPlainObject(v) &&
+      isFiniteNumber(v.latitude) &&
+      v.latitude >= -90 &&
+      v.latitude <= 90 &&
+      isFiniteNumber(v.longitude) &&
+      v.longitude >= -180 &&
+      v.longitude <= 180)
+  );
+}
+
+function isValidLocationLabel(v: unknown): boolean {
+  return v === null || (isPlainObject(v) && typeof v.city === 'string' && typeof v.district === 'string');
+}
+
+function isValidSnoozeMap(v: unknown): boolean {
+  return isPlainObject(v) && Object.values(v).every(isFiniteNumber);
+}
+
+function isValidPrayerPrefs(v: unknown): boolean {
+  return (
+    isPlainObject(v) &&
+    Object.values(v).every(
+      (p) =>
+        isPlainObject(p) &&
+        typeof p.notification === 'boolean' &&
+        typeof p.vibration === 'boolean' &&
+        typeof p.alarm === 'boolean'
+    )
+  );
+}
+
+function isValidStringArray(v: unknown): boolean {
+  return Array.isArray(v) && v.every((x) => typeof x === 'string');
+}
+
+function isValidPrayerStatus(v: unknown): boolean {
+  return v === null || v === 'onTime' || v === 'late' || v === 'missed';
+}
+
+function isValidTrackingDay(v: unknown): boolean {
+  return (
+    isPlainObject(v) &&
+    typeof v.date === 'string' &&
+    DATE_RE.test(v.date) &&
+    isPlainObject(v.statuses) &&
+    Object.values(v.statuses).every(isValidPrayerStatus)
+  );
+}
+
+function isValidTracking(v: unknown): boolean {
+  return Array.isArray(v) && v.every(isValidTrackingDay);
+}
+
+// App.tsx'teki StoredAppState alanlarıyla birebir eşleşir; sadece backup'ta
+// *bulunan* alanlar doğrulanır (Partial<StoredAppState> import edilebilir).
+const APP_STATE_FIELD_VALIDATORS: Record<string, (v: unknown) => boolean> = {
+  language: (v) => v === 'tr' || v === 'en' || v === 'ar',
+  themePreference: (v) => v === 'system' || v === 'dark' || v === 'light',
+  timeFormat: (v) => v === 'system' || v === '24' || v === '12',
+  muteAll: (v) => typeof v === 'boolean',
+  disableVibration: (v) => typeof v === 'boolean',
+  disableAlarm: (v) => typeof v === 'boolean',
+  locationEnabled: (v) => typeof v === 'boolean',
+  locationLabel: isValidLocationLabel,
+  locationCountryCode: (v) => v === null || (typeof v === 'string' && /^[A-Za-z]{2}$/.test(v)),
+  diyanetCityId: (v) => v === null || typeof v === 'string',
+  diyanetDistrictId: (v) => v === null || typeof v === 'string',
+  earlyReminderMinutes: (v) => isFiniteNumber(v) && v >= 0,
+  fridayReminderEnabled: (v) => typeof v === 'boolean',
+  fridayReminderTime: (v) => typeof v === 'string' && TIME_RE.test(v),
+  onboardingCompleted: (v) => typeof v === 'boolean',
+  coords: isValidCoords,
+  prayerPrefs: isValidPrayerPrefs,
+  snoozedUntilByKey: isValidSnoozeMap,
+  cachedPrayerDays: (v) => Array.isArray(v) && v.every(isValidCachedPrayerDay),
+  scheduledPrayerNotificationIds: isValidStringArray,
+  trackingEnabled: (v) => typeof v === 'boolean',
+  trackingNotifMode: (v) => v === 'always' || v === 'ifIncomplete',
+  locationSourceVersion: (v) => v === 2,
+};
+
+function isValidAppState(v: unknown): boolean {
+  if (v === null || v === undefined) return true;
+  if (!isPlainObject(v)) return false;
+  for (const field in APP_STATE_FIELD_VALIDATORS) {
+    if (field in v && !APP_STATE_FIELD_VALIDATORS[field](v[field])) return false;
+  }
+  return true;
+}
+
 /** JSON metnini veya gömülü JSON içeren HTML'i ayrıştırıp doğrular. */
 export function parseBackup(text: string): BackupFile {
   let jsonText = text.trim();
@@ -61,14 +194,26 @@ export function parseBackup(text: string): BackupFile {
     throw new BackupError('invalid');
   }
 
-  if (!data || data.magic !== BACKUP_MAGIC || typeof data.schema !== 'number') {
+  if (
+    !data ||
+    data.magic !== BACKUP_MAGIC ||
+    !Number.isInteger(data.schema) ||
+    data.schema < 1
+  ) {
     throw new BackupError('invalid');
   }
-  if (data.appState != null && typeof data.appState !== 'object') {
+  // appState'in her mevcut alanı beklenen tipte olmalı; aksi halde bozuk
+  // yedek kalıcı depoya yazılmadan reddedilir (bkz. BUG-01).
+  if (!isValidAppState(data.appState)) {
+    throw new BackupError('invalid');
+  }
+  // tracking mevcutsa geçerli günlerden oluşan bir dizi olmalı; sessizce
+  // boşa normalize etmek kullanıcının takip geçmişini fark ettirmeden
+  // kaybetmesine yol açar, bu yüzden geçersizse tüm içe aktarma reddedilir.
+  if (data.tracking != null && !isValidTracking(data.tracking)) {
     throw new BackupError('invalid');
   }
 
-  // tracking dizisini normalize et (bozuk yedeklere karşı dayanıklılık)
   return {
     magic: data.magic,
     schema: data.schema,
@@ -78,6 +223,23 @@ export function parseBackup(text: string): BackupFile {
     appState: data.appState ?? null,
     tracking: Array.isArray(data.tracking) ? data.tracking : [],
   };
+}
+
+/** En az bir durumu işaretlenmiş takip günü sayısı. */
+export function countTrackedDays(tracking: any[]): number {
+  return (Array.isArray(tracking) ? tracking : []).filter(
+    (d) => d && d.statuses && Object.values(d.statuses).some(Boolean)
+  ).length;
+}
+
+/** İçe aktarma onayında gösterilecek kısa, yerelleştirilmiş yedek özeti. */
+export function summarizeBackup(backup: BackupFile, language: BackupLanguage): string {
+  const L = HTML_LABELS[language] ?? HTML_LABELS.tr;
+  return [
+    `${L.exportedAt}: ${formatExportDate(backup.exportedAt, L)}`,
+    `${L.version}: ${backup.appVersion}`,
+    `${L.trackedDays}: ${countTrackedDays(backup.tracking)}`,
+  ].join('\n');
 }
 
 // ─── HTML rapor üretimi ──────────────────────────────────────────────────────
@@ -108,6 +270,7 @@ type HtmlLabels = {
   timeFormat: string;
   earlyReminder: string;
   tracking: string;
+  friday: string;
   on: string;
   off: string;
   minutes: string;
@@ -146,6 +309,7 @@ export const HTML_LABELS: Record<BackupLanguage, HtmlLabels> = {
     timeFormat: 'Saat Sistemi',
     earlyReminder: 'Erken Hatırlatma',
     tracking: 'Namaz Takibi',
+    friday: 'Cuma Hatırlatması',
     on: 'Açık',
     off: 'Kapalı',
     minutes: 'dakika',
@@ -183,6 +347,7 @@ export const HTML_LABELS: Record<BackupLanguage, HtmlLabels> = {
     timeFormat: 'Time Format',
     earlyReminder: 'Early Reminder',
     tracking: 'Prayer Tracking',
+    friday: 'Friday Reminder',
     on: 'On',
     off: 'Off',
     minutes: 'minutes',
@@ -220,6 +385,7 @@ export const HTML_LABELS: Record<BackupLanguage, HtmlLabels> = {
     timeFormat: 'نظام الوقت',
     earlyReminder: 'تذكير مسبق',
     tracking: 'تتبع الصلاة',
+    friday: 'تذكير الجمعة',
     on: 'مفعّل',
     off: 'متوقف',
     minutes: 'دقيقة',
@@ -297,6 +463,11 @@ export function renderHtml(backup: BackupFile, language: BackupLanguage): string
       ? `${state.earlyReminderMinutes} ${L.minutes}`
       : L.exact;
   const trackingOn = state.trackingEnabled ? L.on : L.off;
+  const fridayVal = state.fridayReminderEnabled
+    ? state.fridayReminderTime
+      ? `${L.on} · ${state.fridayReminderTime}`
+      : L.on
+    : L.off;
 
   // Günlük kayıt satırları
   const headCells = PRAYER_ORDER.map((k) => `<th class="ph">${escapeHtml(L.prayersShort[k])}</th>`).join('');
@@ -419,6 +590,7 @@ export function renderHtml(backup: BackupFile, language: BackupLanguage): string
     <div class="row"><span>${escapeHtml(L.theme)}</span><b>${escapeHtml(themeName)}</b></div>
     <div class="row"><span>${escapeHtml(L.timeFormat)}</span><b>${escapeHtml(timeName)}</b></div>
     <div class="row"><span>${escapeHtml(L.earlyReminder)}</span><b>${escapeHtml(early)}</b></div>
+    <div class="row"><span>${escapeHtml(L.friday)}</span><b>${escapeHtml(fridayVal)}</b></div>
     <div class="row"><span>${escapeHtml(L.tracking)}</span><b>${escapeHtml(trackingOn)}</b></div>
   </div>
 

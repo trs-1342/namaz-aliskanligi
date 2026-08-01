@@ -15,33 +15,35 @@ export function formatClock(date = new Date()) {
   return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
-function minutesFromHHMM(value: string) {
-  const [h, m] = value.split(':').map(Number);
-  return h * 60 + m;
+function secondsFromTime(value: string) {
+  const [h, m, s = 0] = value.split(':').map(Number);
+  return h * 3600 + m * 60 + s;
 }
 
 export function getNextPrayer(prayers: PrayerTime[], now = new Date()) {
   if (prayers.length === 0) return null;
 
-  const nowMin = now.getHours() * 60 + now.getMinutes();
-  const next = prayers.find((p) => minutesFromHHMM(p.time) > nowMin) ?? prayers[0];
-  const nextMin = minutesFromHHMM(next.time);
-  const delta = nextMin > nowMin ? nextMin - nowMin : 24 * 60 - nowMin + nextMin;
+  const nowSeconds = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+  const next = prayers.find((p) => secondsFromTime(p.time) > nowSeconds) ?? prayers[0];
+  const nextSeconds = secondsFromTime(next.time);
+  const delta = nextSeconds > nowSeconds
+    ? nextSeconds - nowSeconds
+    : 24 * 3600 - nowSeconds + nextSeconds;
 
   return {
     prayer: next,
-    remaining: `${pad(Math.floor(delta / 60))}:${pad(delta % 60)}:${pad(60 - now.getSeconds()).replace('60', '00')}`,
+    remaining: `${pad(Math.floor(delta / 3600))}:${pad(Math.floor((delta % 3600) / 60))}:${pad(delta % 60)}`,
   };
 }
 
 export function getCurrentPrayer(prayers: PrayerTime[], now = new Date()) {
   if (prayers.length === 0) return null;
 
-  const nowMin = now.getHours() * 60 + now.getMinutes();
-  let current = prayers[0];
+  const nowSeconds = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+  let current = prayers[prayers.length - 1];
 
   for (const prayer of prayers) {
-    if (minutesFromHHMM(prayer.time) <= nowMin) {
+    if (secondsFromTime(prayer.time) <= nowSeconds) {
       current = prayer;
     }
   }
