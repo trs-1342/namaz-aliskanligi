@@ -8,12 +8,12 @@ Geçici notification/location teşhisi açık rıza, kısa süre, veri minimizas
 
 ## Veri akışı
 
-1. Kullanıcı ayarlarda geçici teste açıkça onay verir.
+1. Onboarding tamamlandıktan sonra daha önce karar vermemiş kullanıcıya geçici test için açık onay sorulur; karar sonradan ayarlardan değiştirilebilir.
 2. Uygulamanın planladığı prayer notification foreground'da alınırsa veya Android alarmı son 60 saniye içinde cold-start oluşturursa olay kabul edilir.
 3. O anda `High` accuracy canlı GPS fix'i alınır; cache/last-known kullanılmaz.
-4. Event daha önce denenmediyse Supabase REST'e bir kez insert edilir; background retry kuyruğu yoktur.
+4. İnternet varsa event Supabase REST'e insert edilir. Çevrimdışıysa en fazla 8 event app-private outbox'ta geçici tutulur; bağlantı geldiğinde veya uygulama yeniden active olduğunda gönderilir. Aynı event ID yeniden kuyruğa eklenmez.
 5. Duplicate `409/23505` başarı kabul edilir. Kalıcı 4xx'te hemen; bağlı görünürken üç ardışık network/5xx/429 hatasında özellik kalıcı no-op olur.
-6. 2026-08-04T00:00:00+03:00 anında istemci/RLS insert'i keser; 00:05'te doğrulanmış `pg_cron` işi tabloyu ve kendi job kaydını siler.
+6. Rıza reddedildiğinde/geri çekildiğinde outbox silinir. 2026-08-04T00:00:00+03:00 anında istemci hem insert'i keser hem yerel outbox'ı temizler; RLS de insert'i engeller. 00:05'te doğrulanmış `pg_cron` işi tabloyu ve kendi job kaydını siler.
 
 ## Saklanan alanlar
 
@@ -27,7 +27,7 @@ Geçici notification/location teşhisi açık rıza, kısa süre, veri minimizas
 
 - `npm run check`: başarılı.
 - TypeScript: temiz.
-- Testler: 85/85 assertion başarılı.
+- Testler: 89/89 assertion başarılı.
 - `npm audit --audit-level=high`: 0 vulnerability.
 - `./gradlew :app:compileDebugKotlin`: BUILD SUCCESSFUL.
 - Expo config ve package: version 1.4.0, Android versionCode 40.
@@ -51,6 +51,7 @@ Yeni Supabase projesi Frankfurt bölgesinde oluşturuldu (`chnandwrakzpangwnzsa`
 - APK Signature Scheme v2 doğrulaması geçti; AAB `jarsigner` bütünlük doğrulaması geçti.
 - Final merged manifestte `allowBackup=false`; `READ_EXTERNAL_STORAGE`, `WRITE_EXTERNAL_STORAGE`, `RECORD_AUDIO` ve `FOREGROUND_SERVICE_MICROPHONE` izinleri yoktur.
 - APK SHA-256: `f95cd42ce2e648a8a9cb131b38506a454ecb4aa3346b2be41ebecf4d83fa4e4c`.
+- Onboarding onayı ve offline outbox içeren side-by-side test APK SHA-256: `20c2c2d62485604a46998ea9652432f31cb207f6948ec3c98259c4b5ed7a67cc`.
 - İlk `1.3.9` AAB SHA-256: `1f64165fc90ef52d14353e7e75952c844145f0bc232aa63c49ee7dff086db093`.
 - Son `1.4.0` AAB SHA-256: `44c61476c12106a0887db76abfb8a321bd58786e9977224ff2fd804ad43d9f72`.
 - Bundletool manifest doğrulaması: package `com.trs1342.namazaliskanligi`, versionName `1.4.0`, versionCode `40`.

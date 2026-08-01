@@ -13,9 +13,9 @@ Kesin bitiş: 2026-08-03 23:59:59 Europe/Istanbul
 - [x] **MIG-02:** Eski yedek geri yüklenirse kaldırılan şehir alanlarını ve eski koordinat takvimini yeniden içeri alma; canlı GPS senkronu zorunlu olsun.
 - [x] **TEL-01:** Supabase için insert-only, RLS korumalı `notification_location_diagnostics` şemasını ekle.
 - [x] **TEL-02:** Rastgele `installation_id`/`tester_code`, cihaz adı/modeli, OS/app sürümleri, notification zamanları ile latitude/longitude/accuracy/opsiyonel altitude gönder; gereksiz locale/timezone/heading/speed alanlarını kaldır.
-- [x] **TEL-03:** Veri toplamayı ayrı ve açık uygulama içi onaya bağla; rıza durumunu backup dışında sakla.
+- [x] **TEL-03:** Veri toplamayı onboarding tamamlandıktan sonra gösterilen ayrı ve açık uygulama içi onaya bağla; rıza durumunu backup dışında sakla.
 - [x] **TEL-04:** Yalnız prayer notification foreground-received ve 60 saniyelik Android alarm cold-start olayını tetikleyici kabul et.
-- [x] **TEL-05:** Retry kuyruğu kullanma; event claim geçmişi ve DB unique constraint ile duplicate'i engelle.
+- [x] **TEL-05:** Bildirim anında çevrimdışıysa en fazla 8 olayı app-private outbox'ta tut; bağlantı/foreground dönüşünde gönder, event ID ile duplicate'i engelle, ret/geri çekme/cutoff'ta kuyruğu sil.
 - [x] **TEL-06:** İstemci ve RLS cutoff'unu 3 Ağustos 2026 gün sonuna sabitle.
 - [x] **TEL-07:** Tablo/proje silinirse kalıcı 4xx'te hemen, bağlantı/5xx/429 için üç ardışık uzak hatada cihazda kalıcı no-op'a geç; sayaç yarışını seri kuyrukla engelle.
 - [x] **TEL-08:** Publishable-key/legacy-JWT header ayrımını ve DB duplicate `409/23505` sonucunu testli olarak yönet.

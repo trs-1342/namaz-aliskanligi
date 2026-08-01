@@ -38,6 +38,7 @@
     <ul>
       <li>Kullanıcı hesabı oluşturulmaz</li>
       <li>Onay veren testerde yalnız uygulama bir namaz bildirimini işlediğinde rastgele kurulum kimliği/test kodu, cihaz adı/modeli, uygulama/işletim sistemi sürümü, bildirim-planlama-yakalama-konum ölçüm zamanları, yakalama türü, enlem-boylam-doğruluk ve varsa rakım Supabase'e gönderilir</li>
+      <li>Bildirim işlenirken internet yoksa en fazla 8 kayıt uygulamanın özel depolama alanında geçici bekler; bağlantı gelince gönderilir, katılım reddedilir veya kapatılırsa ve test süresi biterse silinir</li>
       <li>Veri yalnız bildirim ve konum tutarlılığını doğrulamak için kullanılır; reklam veya kullanıcı profilleme amacı yoktur</li>
       <li>Katılım isteğe bağlıdır, ayarlardan kapatılabilir ve gönderim 3 Ağustos 2026 23:59:59 (Europe/Istanbul) sonrasında istemci ve veritabanı tarafından engellenir</li>
       <li>Uygulama arka planda sürekli konum takibi yapmaz</li>
@@ -76,6 +77,7 @@
     <ul>
       <li>No user account is created</li>
       <li>Only when the app processes a prayer notification for a consenting tester, it sends a random installation ID/test code, device name/model, app/OS versions, notification/scheduled/capture/location-reading timestamps, capture mode, latitude/longitude/accuracy and altitude when available to Supabase</li>
+      <li>If the device is offline when the notification is processed, up to 8 records wait temporarily in the app's private storage; they are sent when connectivity returns and deleted if participation is declined or disabled, or when the test ends</li>
       <li>The data is used only to verify notification and location consistency; it is not used for advertising or profiling</li>
       <li>Participation is optional, can be disabled in settings, and uploads are blocked by both the app and database after August 3, 2026 23:59:59 (Europe/Istanbul)</li>
       <li>The app does not continuously track location in the background</li>
@@ -114,6 +116,7 @@
     <ul>
       <li>لا يتم إنشاء حساب مستخدم</li>
       <li>فقط عندما يعالج التطبيق إشعار صلاة لمختبِر موافق، يُرسل معرّف تثبيت/رمز اختبار عشوائي واسم/طراز الجهاز وإصدارات التطبيق/النظام وأوقات الإشعار والجدولة والالتقاط وقياس الموقع ونوع الالتقاط وخط العرض والطول والدقة والارتفاع إن توفر إلى Supabase</li>
+      <li>إذا كان الجهاز غير متصل عند معالجة الإشعار، ينتظر بحد أقصى 8 سجلات مؤقتًا في مساحة التطبيق الخاصة؛ تُرسل عند عودة الاتصال وتُحذف عند رفض المشاركة أو إيقافها أو انتهاء الاختبار</li>
       <li>تُستخدم البيانات فقط للتحقق من اتساق الإشعارات والموقع، وليس للإعلانات أو إنشاء ملفات تعريف</li>
       <li>المشاركة اختيارية ويمكن إيقافها من الإعدادات، ويُمنع الإرسال من التطبيق وقاعدة البيانات بعد 3 أغسطس 2026 الساعة 23:59:59 بتوقيت إسطنبول</li>
       <li>لا يتتبع التطبيق الموقع باستمرار في الخلفية</li>

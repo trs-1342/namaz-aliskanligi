@@ -1,5 +1,22 @@
 export const LOCATION_DIAGNOSTICS_CUTOFF_ISO = '2026-08-04T00:00:00+03:00';
 export const LOCATION_DIAGNOSTICS_CUTOFF_MS = Date.parse(LOCATION_DIAGNOSTICS_CUTOFF_ISO);
+export const LOCATION_DIAGNOSTICS_MAX_OUTBOX_ENTRIES = 8;
+
+export function normalizeDiagnosticsOutboxEntries<T extends { eventId: string; queuedAt: number }>(
+  entries: T[],
+  maxEntries = LOCATION_DIAGNOSTICS_MAX_OUTBOX_ENTRIES
+): T[] {
+  const seen = new Set<string>();
+  const uniqueNewestFirst = entries
+    .filter((entry) => Number.isFinite(entry.queuedAt) && entry.queuedAt < LOCATION_DIAGNOSTICS_CUTOFF_MS)
+    .reverse()
+    .filter((entry) => {
+      if (seen.has(entry.eventId)) return false;
+      seen.add(entry.eventId);
+      return true;
+    });
+  return uniqueNewestFirst.reverse().slice(-Math.max(0, maxEntries));
+}
 
 export function isLocationDiagnosticsWindowOpen(nowMs = Date.now()): boolean {
   return Number.isFinite(nowMs) && nowMs < LOCATION_DIAGNOSTICS_CUTOFF_MS;

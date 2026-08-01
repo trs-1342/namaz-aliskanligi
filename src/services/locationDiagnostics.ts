@@ -10,9 +10,11 @@ import {
   buildSupabasePublicHeaders,
   buildDiagnosticsEventId,
   isDuplicateDiagnosticsResponse,
+  LOCATION_DIAGNOSTICS_MAX_OUTBOX_ENTRIES,
   isLocationDiagnosticsWindowOpen,
   isPermanentDiagnosticsFailure,
   isRetryableDiagnosticsFailure,
+  normalizeDiagnosticsOutboxEntries,
   shouldDisableAfterRemoteFailures,
 } from './locationDiagnosticsPolicy';
 
@@ -21,6 +23,7 @@ const DISABLED_KEY = 'namaz-aliskanligi:location-diagnostics:disabled:v2';
 const INSTALLATION_ID_KEY = 'namaz-aliskanligi:location-diagnostics:installation-id:v1';
 const ATTEMPT_HISTORY_KEY = 'namaz-aliskanligi:location-diagnostics:attempt-history:v1';
 const REMOTE_FAILURE_COUNT_KEY = 'namaz-aliskanligi:location-diagnostics:remote-failures:v1';
+const OUTBOX_KEY = 'namaz-aliskanligi:location-diagnostics:outbox:v1';
 const REQUEST_TIMEOUT_MS = 12_000;
 
 const FEATURE_ENABLED = process.env.EXPO_PUBLIC_LOCATION_DIAGNOSTICS_ENABLED === 'true';
@@ -38,13 +41,25 @@ export type DiagnosticsNotification = {
 };
 
 type ConsentRecord = {
-  enabled: true;
-  consentedAt: string;
+  enabled: boolean;
+  decidedAt: string;
+  consentedAt?: string;
 };
+
+type DiagnosticsPayload = Record<string, unknown>;
+
+type DiagnosticsOutboxEntry = {
+  eventId: string;
+  queuedAt: number;
+  payload: DiagnosticsPayload;
+};
+
+type UploadResult = 'sent' | 'retryable' | 'permanent';
 
 const attemptsInFlight = new Set<string>();
 let attemptClaimQueue: Promise<void> = Promise.resolve();
 let remoteFailureQueue: Promise<void> = Promise.resolve();
+let outboxQueue: Promise<void> = Promise.resolve();
 let installationIdPromise: Promise<string> | null = null;
 let diagnosticsStateGeneration = 0;
 
@@ -109,6 +124,7 @@ async function getInstallationId(): Promise<string> {
 
 async function permanentlyDisable(reason: string): Promise<void> {
   await AsyncStorage.setItem(DISABLED_KEY, JSON.stringify({ reason, disabledAt: new Date().toISOString() }));
+  await AsyncStorage.removeItem(OUTBOX_KEY);
 }
 
 async function resetRemoteFailures(): Promise<void> {
@@ -148,16 +164,36 @@ export async function getLocationDiagnosticsConsent(): Promise<boolean> {
   }
 }
 
+export async function hasLocationDiagnosticsConsentDecision(): Promise<boolean> {
+  const raw = await AsyncStorage.getItem(CONSENT_KEY);
+  if (!raw) return false;
+  try {
+    const parsed = JSON.parse(raw) as Partial<ConsentRecord>;
+    return typeof parsed.enabled === 'boolean' &&
+      (typeof parsed.decidedAt === 'string' || typeof parsed.consentedAt === 'string');
+  } catch {
+    return false;
+  }
+}
+
 export async function setLocationDiagnosticsConsent(enabled: boolean): Promise<void> {
   if (!enabled) {
     diagnosticsStateGeneration += 1;
-    await AsyncStorage.removeItem(CONSENT_KEY);
+    await runOutboxOperation(async () => {
+      await AsyncStorage.setItem(CONSENT_KEY, JSON.stringify({
+        enabled: false,
+        decidedAt: new Date().toISOString(),
+      } satisfies ConsentRecord));
+      await AsyncStorage.removeItem(OUTBOX_KEY);
+    });
     return;
   }
   if (!isLocationDiagnosticsAvailable()) return;
+  const now = new Date().toISOString();
   await AsyncStorage.setItem(CONSENT_KEY, JSON.stringify({
     enabled: true,
-    consentedAt: new Date().toISOString(),
+    decidedAt: now,
+    consentedAt: now,
   } satisfies ConsentRecord));
 }
 
@@ -166,6 +202,7 @@ export async function clearLocationDiagnosticsLocalState(): Promise<void> {
   await Promise.allSettled([
     attemptClaimQueue,
     remoteFailureQueue,
+    outboxQueue,
     installationIdPromise ?? Promise.resolve(),
   ]);
   installationIdPromise = null;
@@ -175,7 +212,130 @@ export async function clearLocationDiagnosticsLocalState(): Promise<void> {
     INSTALLATION_ID_KEY,
     ATTEMPT_HISTORY_KEY,
     REMOTE_FAILURE_COUNT_KEY,
+    OUTBOX_KEY,
   ]);
+}
+
+function parseOutbox(raw: string | null): DiagnosticsOutboxEntry[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((entry): entry is DiagnosticsOutboxEntry => {
+      if (!entry || typeof entry !== 'object') return false;
+      const candidate = entry as Partial<DiagnosticsOutboxEntry>;
+      return typeof candidate.eventId === 'string' &&
+        typeof candidate.queuedAt === 'number' &&
+        candidate.payload != null &&
+        typeof candidate.payload === 'object' &&
+        !Array.isArray(candidate.payload);
+    });
+  } catch {
+    return [];
+  }
+}
+
+function validOutboxEntries(entries: DiagnosticsOutboxEntry[]): DiagnosticsOutboxEntry[] {
+  return normalizeDiagnosticsOutboxEntries(entries, LOCATION_DIAGNOSTICS_MAX_OUTBOX_ENTRIES);
+}
+
+function runOutboxOperation(operation: () => Promise<void>): Promise<void> {
+  const next = outboxQueue.then(operation);
+  outboxQueue = next.catch(() => undefined);
+  return next;
+}
+
+async function enqueueDiagnosticsPayload(eventId: string, payload: DiagnosticsPayload): Promise<void> {
+  await runOutboxOperation(async () => {
+    if (!(await getLocationDiagnosticsConsent()) || !isLocationDiagnosticsWindowOpen()) return;
+    const entries = validOutboxEntries(parseOutbox(await AsyncStorage.getItem(OUTBOX_KEY)));
+    const withoutDuplicate = entries.filter((entry) => entry.eventId !== eventId);
+    const next = validOutboxEntries([...withoutDuplicate, { eventId, queuedAt: Date.now(), payload }]);
+    await AsyncStorage.setItem(OUTBOX_KEY, JSON.stringify(next));
+  });
+}
+
+async function postDiagnosticsPayload(payload: DiagnosticsPayload): Promise<UploadResult> {
+  let response: Response;
+  try {
+    const headers: Record<string, string> = {
+      ...buildSupabasePublicHeaders(SUPABASE_PUBLIC_KEY),
+      'Content-Type': 'application/json',
+      Prefer: 'return=minimal',
+    };
+    response = await withTimeout(fetch(`${SUPABASE_URL}/rest/v1/notification_location_diagnostics`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+    }), REQUEST_TIMEOUT_MS);
+  } catch (error) {
+    if (await recordRemoteFailure()) {
+      await permanentlyDisable('remote-unreachable:consecutive-failures');
+      return 'permanent';
+    }
+    console.warn('[location-diagnostics] remote unavailable', error);
+    return 'retryable';
+  }
+
+  if (response.ok) {
+    await resetRemoteFailures();
+    return 'sent';
+  }
+
+  let responseCode: string | undefined;
+  try {
+    const body = await response.json() as { code?: unknown };
+    if (typeof body.code === 'string') responseCode = body.code;
+  } catch {
+    // HTTP durum kodu sınıflandırma için yeterlidir.
+  }
+
+  if (isDuplicateDiagnosticsResponse(response.status, responseCode)) {
+    await resetRemoteFailures();
+    return 'sent';
+  }
+  if (isPermanentDiagnosticsFailure(response.status, responseCode)) {
+    await permanentlyDisable(`remote-unavailable:${response.status}:${responseCode ?? 'unknown'}`);
+    return 'permanent';
+  }
+  if (isRetryableDiagnosticsFailure(response.status)) {
+    if (await recordRemoteFailure()) {
+      await permanentlyDisable(`remote-unavailable:${response.status}:consecutive-failures`);
+      return 'permanent';
+    }
+    return 'retryable';
+  }
+  console.warn('[location-diagnostics] upload rejected', response.status, responseCode);
+  return 'retryable';
+}
+
+export async function flushLocationDiagnosticsOutbox(): Promise<void> {
+  if (!FEATURE_ENABLED || !SUPABASE_URL || !SUPABASE_PUBLIC_KEY || !isLocationDiagnosticsWindowOpen()) {
+    await runOutboxOperation(() => AsyncStorage.removeItem(OUTBOX_KEY));
+    return;
+  }
+  if (!(await getLocationDiagnosticsConsent())) return;
+  const network = await NetInfo.fetch();
+  if (!network.isConnected || network.isInternetReachable === false) return;
+
+  await runOutboxOperation(async () => {
+    const entries = validOutboxEntries(parseOutbox(await AsyncStorage.getItem(OUTBOX_KEY)));
+    const remaining: DiagnosticsOutboxEntry[] = [];
+
+    for (let index = 0; index < entries.length; index += 1) {
+      if (!(await getLocationDiagnosticsConsent()) || !isLocationDiagnosticsWindowOpen()) break;
+      const result = await postDiagnosticsPayload(entries[index].payload);
+      if (result === 'sent') continue;
+      if (result === 'retryable') remaining.push(...entries.slice(index));
+      break;
+    }
+
+    if (remaining.length > 0) {
+      await AsyncStorage.setItem(OUTBOX_KEY, JSON.stringify(validOutboxEntries(remaining)));
+    } else {
+      await AsyncStorage.removeItem(OUTBOX_KEY);
+    }
+  });
 }
 
 export async function captureNotificationLocation(
@@ -235,65 +395,16 @@ export async function captureNotificationLocation(
       location_timestamp: new Date(position.timestamp).toISOString(),
     };
 
-    let response: Response;
-    try {
-      if (captureGeneration !== diagnosticsStateGeneration || !(await getLocationDiagnosticsConsent())) return;
-      const network = await NetInfo.fetch();
-      if (!network.isConnected || network.isInternetReachable === false) return;
-
-      const headers: Record<string, string> = {
-        ...buildSupabasePublicHeaders(SUPABASE_PUBLIC_KEY),
-        'Content-Type': 'application/json',
-        Prefer: 'return=minimal',
-      };
-
-      response = await withTimeout(fetch(`${SUPABASE_URL}/rest/v1/notification_location_diagnostics`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(payload),
-      }), REQUEST_TIMEOUT_MS);
-    } catch (error) {
-      // Proje tamamen silindiğinde bağlantı 404 yerine DNS/network hatası da
-      // verebilir. Tek geçici ağ hatası test katılımını bitirmez; bağlantı var
-      // görünürken üç ardışık uzak hata sonrası özellik kalıcı no-op olur.
-      if (await recordRemoteFailure()) {
-        await permanentlyDisable('remote-unreachable:consecutive-failures');
-      }
-      console.warn('[location-diagnostics] remote unavailable', error);
+    if (captureGeneration !== diagnosticsStateGeneration || !(await getLocationDiagnosticsConsent())) return;
+    const network = await NetInfo.fetch();
+    if (!network.isConnected || network.isInternetReachable === false) {
+      await enqueueDiagnosticsPayload(eventId, payload);
       return;
     }
 
-    if (response.ok) {
-      await resetRemoteFailures();
-      return;
-    }
-
-    let responseCode: string | undefined;
-    try {
-      const body = await response.json() as { code?: unknown };
-      if (typeof body.code === 'string') responseCode = body.code;
-    } catch {
-      // Kalıcı hata sınıflandırması HTTP durum koduyla yapılmaya devam eder.
-    }
-
-    // Aynı notification yeniden teslim edilirse unique constraint güvenli bir
-    // deduplication katmanıdır; bu durum uzak servis arızası değildir.
-    if (isDuplicateDiagnosticsResponse(response.status, responseCode)) {
-      await resetRemoteFailures();
-      return;
-    }
-
-    if (isPermanentDiagnosticsFailure(response.status, responseCode)) {
-      await permanentlyDisable(`remote-unavailable:${response.status}:${responseCode ?? 'unknown'}`);
-      return;
-    }
-    if (isRetryableDiagnosticsFailure(response.status) && await recordRemoteFailure()) {
-      await permanentlyDisable(`remote-unavailable:${response.status}:consecutive-failures`);
-      return;
-    }
-    console.warn('[location-diagnostics] upload rejected', response.status, responseCode);
+    const result = await postDiagnosticsPayload(payload);
+    if (result === 'retryable') await enqueueDiagnosticsPayload(eventId, payload);
   } catch (error) {
-    // Kuyruk/retry yok: yerel hazırlık hatası bu notification örneğini düşürür.
     console.warn('[location-diagnostics] capture skipped', error);
   } finally {
     attemptsInFlight.delete(eventId);

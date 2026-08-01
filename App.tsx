@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
+  AppState,
   Appearance,
   BackHandler,
   KeyboardAvoidingView,
@@ -56,7 +57,9 @@ import { buildTrackingReminderSpecs } from './src/notifications/trackingSchedule
 import {
   captureNotificationLocation,
   clearLocationDiagnosticsLocalState,
+  flushLocationDiagnosticsOutbox,
   getLocationDiagnosticsConsent,
+  hasLocationDiagnosticsConsentDecision,
   isLocationDiagnosticsAvailable,
   setLocationDiagnosticsConsent,
 } from './src/services/locationDiagnostics';
@@ -138,9 +141,9 @@ const DICTS = {
     disableVibration: 'Titreşimleri Kapat',
     disableAlarm: 'Alarmları Kapat',
     locationDiagnostics: 'Geçici Konum Doğrulama Testi',
-    locationDiagnosticsDescription: 'Onay verirseniz yalnız namaz bildirimi uygulama tarafından işlendiğinde test kodu, cihaz/uygulama sürümü, bildirim zamanları ve hassas konum ölçümü Supabase test tablosuna gönderilir. Test 3 Ağustos 2026 sonunda otomatik biter.',
+    locationDiagnosticsDescription: 'Onay verirseniz yalnız namaz bildirimi uygulama tarafından işlendiğinde test kodu, cihaz/uygulama sürümü, bildirim zamanları ve hassas konum ölçümü Supabase test tablosuna gönderilir. İnternet yoksa en fazla 8 kayıt uygulamanın özel alanında bekler ve bağlantı gelince gönderilir. Test 3 Ağustos 2026 sonunda otomatik biter.',
     locationDiagnosticsConsentTitle: 'Hassas Konum Paylaşım Onayı',
-    locationDiagnosticsConsentBody: 'Bu kapalı testte namaz bildirimi uygulama tarafından işlendiğinde rastgele kurulum kimliği/test kodu; cihaz adı/modeli; işletim sistemi ve uygulama sürümü; bildirim, planlama, yakalama ve konum ölçüm zamanları; yakalama türü; enlem, boylam, doğruluk ve varsa rakım gönderilir. Veriler yalnız bildirim ve konum tutarlılığını doğrulamak için kullanılır. Katılım isteğe bağlıdır ve 3 Ağustos 2026 sonunda otomatik durur.',
+    locationDiagnosticsConsentBody: 'Bu kapalı testte namaz bildirimi uygulama tarafından işlendiğinde rastgele kurulum kimliği/test kodu; cihaz adı/modeli; işletim sistemi ve uygulama sürümü; bildirim, planlama, yakalama ve konum ölçüm zamanları; yakalama türü; enlem, boylam, doğruluk ve varsa rakım gönderilir. O anda internet yoksa en fazla 8 kayıt uygulamanın özel alanında geçici tutulur ve bağlantı gelince gönderilir. Reddederseniz veya katılımı kapatırsanız bekleyen kayıtlar silinir. Veriler yalnız bildirim ve konum tutarlılığını doğrulamak için kullanılır. Katılım isteğe bağlıdır ve 3 Ağustos 2026 sonunda otomatik durur.',
     locationDiagnosticsAccept: 'Kabul Ediyorum',
     locationDiagnosticsCancel: 'Vazgeç',
     resetData: 'Tüm Verileri Sıfırla',
@@ -262,9 +265,9 @@ const DICTS = {
     disableVibration: 'Disable Vibrations',
     disableAlarm: 'Disable Alarms',
     locationDiagnostics: 'Temporary Location Verification Test',
-    locationDiagnosticsDescription: 'If you consent, a test code, device/app versions, notification timestamps and a precise location reading are sent to the Supabase test table only when the app processes a prayer notification. The test automatically ends after August 3, 2026.',
+    locationDiagnosticsDescription: 'If you consent, a test code, device/app versions, notification timestamps and a precise location reading are sent to the Supabase test table only when the app processes a prayer notification. If offline, up to 8 records wait in the app\'s private storage and are sent when connectivity returns. The test automatically ends after August 3, 2026.',
     locationDiagnosticsConsentTitle: 'Precise Location Sharing Consent',
-    locationDiagnosticsConsentBody: 'In this closed test, when the app processes a prayer notification it sends a random installation ID/test code; device name/model; OS and app versions; notification, scheduled, capture and location-reading timestamps; capture mode; latitude, longitude, accuracy and altitude when available. The data is used only to verify notification and location consistency. Participation is optional and automatically stops after August 3, 2026.',
+    locationDiagnosticsConsentBody: 'In this closed test, when the app processes a prayer notification it sends a random installation ID/test code; device name/model; OS and app versions; notification, scheduled, capture and location-reading timestamps; capture mode; latitude, longitude, accuracy and altitude when available. If offline, up to 8 records are temporarily kept in the app\'s private storage and sent when connectivity returns. Pending records are deleted if you decline or leave the test. The data is used only to verify notification and location consistency. Participation is optional and automatically stops after August 3, 2026.',
     locationDiagnosticsAccept: 'I Agree',
     locationDiagnosticsCancel: 'Cancel',
     resetData: 'Reset All Data',
@@ -386,9 +389,9 @@ const DICTS = {
     disableVibration: 'إيقاف الاهتزاز',
     disableAlarm: 'إيقاف المنبهات',
     locationDiagnostics: 'اختبار مؤقت للتحقق من الموقع',
-    locationDiagnosticsDescription: 'إذا وافقت، يُرسل رمز الاختبار وإصدارات الجهاز/التطبيق وأوقات الإشعار وقياس الموقع الدقيق إلى جدول اختبار Supabase فقط عندما يعالج التطبيق إشعار الصلاة. ينتهي الاختبار تلقائيًا بعد 3 أغسطس 2026.',
+    locationDiagnosticsDescription: 'إذا وافقت، يُرسل رمز الاختبار وإصدارات الجهاز/التطبيق وأوقات الإشعار وقياس الموقع الدقيق إلى جدول اختبار Supabase فقط عندما يعالج التطبيق إشعار الصلاة. عند انقطاع الإنترنت، ينتظر بحد أقصى 8 سجلات في مساحة التطبيق الخاصة وتُرسل عند عودة الاتصال. ينتهي الاختبار تلقائيًا بعد 3 أغسطس 2026.',
     locationDiagnosticsConsentTitle: 'الموافقة على مشاركة الموقع الدقيق',
-    locationDiagnosticsConsentBody: 'في هذا الاختبار المغلق، عندما يعالج التطبيق إشعار الصلاة، يُرسل معرّف تثبيت/رمز اختبار عشوائي؛ اسم/طراز الجهاز؛ إصدارات النظام والتطبيق؛ أوقات الإشعار والجدولة والالتقاط وقياس الموقع؛ نوع الالتقاط؛ خط العرض والطول والدقة والارتفاع إن توفر. تُستخدم البيانات فقط للتحقق من اتساق الإشعارات والموقع. المشاركة اختيارية وتتوقف تلقائيًا بعد 3 أغسطس 2026.',
+    locationDiagnosticsConsentBody: 'في هذا الاختبار المغلق، عندما يعالج التطبيق إشعار الصلاة، يُرسل معرّف تثبيت/رمز اختبار عشوائي؛ اسم/طراز الجهاز؛ إصدارات النظام والتطبيق؛ أوقات الإشعار والجدولة والالتقاط وقياس الموقع؛ نوع الالتقاط؛ خط العرض والطول والدقة والارتفاع إن توفر. عند انقطاع الإنترنت، يُحفظ بحد أقصى 8 سجلات مؤقتًا في مساحة التطبيق الخاصة وتُرسل عند عودة الاتصال. تُحذف السجلات المعلقة إذا رفضت أو أوقفت المشاركة. تُستخدم البيانات فقط للتحقق من اتساق الإشعارات والموقع. المشاركة اختيارية وتتوقف تلقائيًا بعد 3 أغسطس 2026.',
     locationDiagnosticsAccept: 'أوافق',
     locationDiagnosticsCancel: 'إلغاء',
     resetData: 'إعادة تعيين كل البيانات',
@@ -737,6 +740,7 @@ function App() {
   const alarmIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const alarmPlayerRef = useRef<any>(null);
   const hasRequestedLocationRef = useRef(false);
+  const hasPromptedLocationDiagnosticsRef = useRef(false);
   const scheduledPrayerIdsRef = useRef<string[]>([]);
   // Planlama çağrılarını seri hale getirmek için promise zinciri (yarış koşulu önler)
   const schedulingChainRef = useRef<Promise<void>>(Promise.resolve());
@@ -749,14 +753,39 @@ function App() {
 
   useEffect(() => {
     const unsub = NetInfo.addEventListener((state) => {
-      setIsOnline(Boolean(state.isConnected && state.isInternetReachable !== false));
+      const online = Boolean(state.isConnected && state.isInternetReachable !== false);
+      setIsOnline(online);
+      if (online) {
+        flushLocationDiagnosticsOutbox()
+          .then(() => getLocationDiagnosticsConsent())
+          .then(setLocationDiagnosticsConsentState)
+          .catch((error) => console.warn('[location-diagnostics] outbox could not be flushed', error));
+      }
     });
 
     NetInfo.fetch().then((state) => {
-      setIsOnline(Boolean(state.isConnected && state.isInternetReachable !== false));
+      const online = Boolean(state.isConnected && state.isInternetReachable !== false);
+      setIsOnline(online);
+      if (online) {
+        flushLocationDiagnosticsOutbox()
+          .then(() => getLocationDiagnosticsConsent())
+          .then(setLocationDiagnosticsConsentState)
+          .catch((error) => console.warn('[location-diagnostics] initial outbox flush failed', error));
+      }
     });
 
     return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState !== 'active') return;
+      flushLocationDiagnosticsOutbox()
+        .then(() => getLocationDiagnosticsConsent())
+        .then(setLocationDiagnosticsConsentState)
+        .catch((error) => console.warn('[location-diagnostics] foreground outbox flush failed', error));
+    });
+    return () => subscription.remove();
   }, []);
 
   useEffect(() => {
@@ -858,6 +887,30 @@ function App() {
       .catch((error) => console.warn('[location-diagnostics] consent could not be loaded', error));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!hydrated || !onboardingCompleted || !isLocationDiagnosticsAvailable()) return;
+    if (hasPromptedLocationDiagnosticsRef.current) return;
+    hasPromptedLocationDiagnosticsRef.current = true;
+
+    let active = true;
+    let promptTimer: ReturnType<typeof setTimeout> | null = null;
+    hasLocationDiagnosticsConsentDecision()
+      .then((hasDecision) => {
+        if (!active || hasDecision) return;
+        // Onboarding görünümü kapandıktan sonra sistem diyaloğunu aç.
+        promptTimer = setTimeout(() => {
+          if (active) promptLocationDiagnosticsConsent();
+        }, 250);
+      })
+      .catch((error) => console.warn('[location-diagnostics] consent decision could not be read', error));
+
+    return () => {
+      active = false;
+      if (promptTimer) clearTimeout(promptTimer);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hydrated, onboardingCompleted]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -1858,8 +1911,20 @@ function App() {
       return;
     }
 
+    promptLocationDiagnosticsConsent();
+  }
+
+  function promptLocationDiagnosticsConsent() {
     Alert.alert(t.locationDiagnosticsConsentTitle, t.locationDiagnosticsConsentBody, [
-      { text: t.locationDiagnosticsCancel, style: 'cancel' },
+      {
+        text: t.locationDiagnosticsCancel,
+        style: 'cancel',
+        onPress: () => {
+          setLocationDiagnosticsConsent(false)
+            .then(() => setLocationDiagnosticsConsentState(false))
+            .catch((error) => console.warn('[location-diagnostics] declined decision could not be saved', error));
+        },
+      },
       {
         text: t.locationDiagnosticsAccept,
         onPress: () => {
@@ -1869,7 +1934,7 @@ function App() {
             .catch((error) => console.warn('[location-diagnostics] consent could not be saved', error));
         },
       },
-    ]);
+    ], { cancelable: false });
   }
 
   if (!fontsLoaded || !hydrated) {

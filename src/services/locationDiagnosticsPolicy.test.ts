@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
 import {
   LOCATION_DIAGNOSTICS_CUTOFF_MS,
+  LOCATION_DIAGNOSTICS_MAX_OUTBOX_ENTRIES,
   buildDiagnosticsEventId,
   buildSupabasePublicHeaders,
   isDuplicateDiagnosticsResponse,
   isLocationDiagnosticsWindowOpen,
   isPermanentDiagnosticsFailure,
   isRetryableDiagnosticsFailure,
+  normalizeDiagnosticsOutboxEntries,
   shouldDisableAfterRemoteFailures,
 } from './locationDiagnosticsPolicy.ts';
 
@@ -37,4 +39,29 @@ assert.deepEqual(buildSupabasePublicHeaders('legacy-jwt'), {
 });
 assert.equal(buildDiagnosticsEventId('notification-1', '2026-08-01T10:00:00.000Z'), 'notification-1:2026-08-01T10:00:00.000Z');
 
-console.log('location diagnostics policy tests passed (21 assertions)');
+const outboxEntries = Array.from({ length: 10 }, (_, index) => ({
+  eventId: `event-${index}`,
+  queuedAt: LOCATION_DIAGNOSTICS_CUTOFF_MS - 10_000 + index,
+}));
+assert.equal(LOCATION_DIAGNOSTICS_MAX_OUTBOX_ENTRIES, 8);
+assert.deepEqual(
+  normalizeDiagnosticsOutboxEntries(outboxEntries).map((entry) => entry.eventId),
+  outboxEntries.slice(2).map((entry) => entry.eventId)
+);
+assert.deepEqual(
+  normalizeDiagnosticsOutboxEntries([
+    { eventId: 'duplicate', queuedAt: 1 },
+    { eventId: 'other', queuedAt: 2 },
+    { eventId: 'duplicate', queuedAt: 3 },
+  ]),
+  [
+    { eventId: 'other', queuedAt: 2 },
+    { eventId: 'duplicate', queuedAt: 3 },
+  ]
+);
+assert.deepEqual(
+  normalizeDiagnosticsOutboxEntries([{ eventId: 'expired', queuedAt: LOCATION_DIAGNOSTICS_CUTOFF_MS }]),
+  []
+);
+
+console.log('location diagnostics policy tests passed (25 assertions)');
