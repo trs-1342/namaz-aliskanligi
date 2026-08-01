@@ -30,7 +30,7 @@ Geçici notification/location teşhisi açık rıza, kısa süre, veri minimizas
 - Testler: 85/85 assertion başarılı.
 - `npm audit --audit-level=high`: 0 vulnerability.
 - `./gradlew :app:compileDebugKotlin`: BUILD SUCCESSFUL.
-- Expo config: version 1.3.9, Android versionCode 36.
+- Expo config ve package: version 1.4.0, Android versionCode 40.
 - Production Android Expo export: başarılı (916 module, Hermes bundle).
 - Expo dependency check: güncel.
 - Uzak Supabase: altı migration eşleşiyor, tablo boş, RLS/grants ve tam expiry command assertion doğrulandı.
@@ -47,11 +47,13 @@ Yeni Supabase projesi Frankfurt bölgesinde oluşturuldu (`chnandwrakzpangwnzsa`
 ## Android release build sonucu
 
 - EAS remote release credential ile production AAB ve preview APK yerel EAS build üzerinden başarıyla üretildi; debug keystore fallback'i kullanılmadı.
-- Her iki artefact `1.3.9` / versionCode `36` ve aynı RSA-2048 sertifikasıyla imzalıdır. Sertifika SHA-256 özeti önceki `v1.0.4` APK ile aynıdır; sideload update zinciri korunur.
+- İlk doğrulama artefact'ları `1.3.9` / versionCode `36` olarak üretildi. Play Console'daki `1.3.7` sürümüne karşı ek güvenlik payı için son production AAB `1.4.0` / versionCode `40` olarak yeniden üretildi; EAS remote versionCode da `40` yapıldı.
 - APK Signature Scheme v2 doğrulaması geçti; AAB `jarsigner` bütünlük doğrulaması geçti.
 - Final merged manifestte `allowBackup=false`; `READ_EXTERNAL_STORAGE`, `WRITE_EXTERNAL_STORAGE`, `RECORD_AUDIO` ve `FOREGROUND_SERVICE_MICROPHONE` izinleri yoktur.
 - APK SHA-256: `f95cd42ce2e648a8a9cb131b38506a454ecb4aa3346b2be41ebecf4d83fa4e4c`.
-- AAB SHA-256: `1f64165fc90ef52d14353e7e75952c844145f0bc232aa63c49ee7dff086db093`.
+- İlk `1.3.9` AAB SHA-256: `1f64165fc90ef52d14353e7e75952c844145f0bc232aa63c49ee7dff086db093`.
+- Son `1.4.0` AAB SHA-256: `44c61476c12106a0887db76abfb8a321bd58786e9977224ff2fd804ad43d9f72`.
+- Bundletool manifest doğrulaması: package `com.trs1342.namazaliskanligi`, versionName `1.4.0`, versionCode `40`.
 - Bağlı Android cihaz bulunmadığından install/killed/locked/reboot smoke testi yapılmadı; bu operasyonel kapı açık kalır.
 
 Kaynaklar: [Expo Notifications SDK 54](https://docs.expo.dev/versions/v54.0.0/sdk/notifications/), [Expo Location](https://docs.expo.dev/versions/latest/sdk/location/), [Google Play background location policy](https://support.google.com/googleplay/android-developer/answer/9799150), [Supabase API security](https://supabase.com/docs/guides/api/securing-your-api).

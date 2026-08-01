@@ -36,11 +36,11 @@ Claude Code daha sonra TODO işaretlerinden bağımsız ikinci bir denetim yapt�
 ## Doğrulama kanıtları
 
 - `npm ci` — başarılı; postinstall alarm patch uygulandı.
-- `npm run check:version` — `1.3.9`, başarılı.
+- `npm run check:version` — son sürüm `1.4.0`, başarılı.
 - `npm run typecheck` — başarılı.
 - `npm test` — toplam 85 assertion başarılı.
 - `npm audit --audit-level=high` — **0 vulnerability**.
-- `npx expo config --type public --json` — version `1.3.9`, Android versionCode `36`, custom plugin kayıtlı, full-screen permission mevcut.
+- `npx expo config --type public --json` — son sürüm `1.4.0`, Android versionCode `40`, custom plugin kayıtlı, full-screen permission mevcut.
 - `./gradlew :app:compileDebugKotlin` — **BUILD SUCCESSFUL**.
 - `./gradlew :app:assembleRelease` (credential olmadan) — beklenen `Release signing credentials are required` hatasıyla bloklandı.
 - `git diff --check` — temiz.
@@ -49,6 +49,6 @@ Claude Code daha sonra TODO işaretlerinden bağımsız ikinci bir denetim yapt�
 ## Operasyonel teslim notları
 
 - EAS credential store'daki mevcut production signing key kullanıldı; credential veya secret repo içine yazılmadı.
-- İmzalı `1.3.9` / versionCode `36` AAB ve APK üretildi; artefact imzaları ve eski APK ile sertifika eşleşmesi doğrulandı.
+- İlk imzalı `1.3.9` / versionCode `36` AAB ve APK doğrulamasından sonra Play sürüm sıralaması için EAS remote versionCode `40` yapıldı ve imzalı `1.4.0` AAB üretildi; bundletool ile manifest sürümü doğrulandı.
 - APK Git index'inden çıkarılması staged durumdadır; yerel binary `.gitignore` nedeniyle korunur.
 - Gerçek cihazda killed/locked/reboot alarm matrisi statik ve compile-time testlerin yerine geçmez; yayın öncesi smoke test zorunludur.

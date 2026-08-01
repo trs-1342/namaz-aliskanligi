@@ -1,7 +1,7 @@
 # Konum ve Geçici Notification Telemetrisi — TODO
 
 Tarih: 2026-08-01
-Sürüm: 1.3.9 / Android versionCode 36
+Sürüm: 1.4.0 / Android versionCode 40
 Kesin bitiş: 2026-08-03 23:59:59 Europe/Istanbul
 
 ## Kod
@@ -21,7 +21,7 @@ Kesin bitiş: 2026-08-03 23:59:59 Europe/Istanbul
 - [x] **TEL-08:** Publishable-key/legacy-JWT header ayrımını ve DB duplicate `409/23505` sonucunu testli olarak yönet.
 - [x] **TEL-09:** Rıza geri çekildiğinde devam eden capture'ı nesil kontrolüyle iptal et; kalıcı disable sonrası UI switch durumunu tazele.
 - [x] **PRIV-01:** Türkçe/İngilizce/Arapça gizlilik politikasını geçici test, Supabase ve hassas konum açıklamasıyla güncelle.
-- [x] **REL-01:** Uygulama sürümünü 1.3.9, Android versionCode'u 36 yap; imzalı AAB/APK üretimini ve artefact doğrulamasını tamamla.
+- [x] **REL-01:** Uygulama sürümünü 1.4.0, Android versionCode'u 40 yap; EAS remote versionCode'u eşleştir ve imzalı AAB artefact'ını doğrula.
 - [x] **VER-01:** Typecheck, 85 assertion, high audit, Android Kotlin compile ve production Android Expo export doğrulamalarını tamamla.
 - [x] **PEER-01:** Claude Code ile iki bağımsız security/runtime/SQL incelemesi yap; son bulguları kapat.
 
