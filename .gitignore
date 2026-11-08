@@ -18,3 +18,8 @@ supabase/.temp/
 !CLAUDE_CODE_LOCATION_REVIEW.md
 !SUPABASE_REMOTE_SETUP_REPORT.md
 old_verions/
+
+# Yerel derleme çıktıları (scripts/build.sh -> ./builds/namaz-<sürüm>-<profil>-<sha>-<tarih>.apk)
+/builds/
+BU.apk
+BU.aab

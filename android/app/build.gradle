@@ -14,7 +14,6 @@ def hasReleaseSigning = [releaseStorePath, releaseStorePassword, releaseKeyAlias
 def releaseRequested = gradle.startParameter.taskNames.any { it.toLowerCase().contains('release') }
 def hasInjectedSigning = project.hasProperty('android.injected.signing.store.file')
 def hasEasInjectedSigning = System.getenv('EAS_BUILD') && file("${projectRoot}/credentials.json").exists()
-def isSideBySideTestBuild = System.getenv('NAMAZ_TEST_PACKAGE') == 'true'
 
 if (releaseRequested && !hasReleaseSigning && !hasInjectedSigning && !hasEasInjectedSigning) {
     throw new GradleException('Release signing credentials are required; debug.keystore is never accepted for release.')
@@ -106,13 +105,9 @@ android {
     namespace 'com.trs1342.namazaliskanligi'
     defaultConfig {
         applicationId 'com.trs1342.namazaliskanligi'
-        if (isSideBySideTestBuild) {
-            applicationIdSuffix '.test'
-            resValue 'string', 'app_name', 'Namaz Alışkanlığı Test'
-        }
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode expoAppConfig.expo.android.versionCode as int
+        versionCode 40
         versionName expoAppConfig.expo.version as String
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""

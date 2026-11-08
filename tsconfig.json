@@ -4,5 +4,8 @@
     "strict": true,
     "baseUrl": "."
   },
-  "exclude": ["**/*.test.ts"]
+  "exclude": [
+    "**/*.test.ts",
+    "supabase/**"
+  ]
 }

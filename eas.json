@@ -24,17 +24,6 @@
         "buildType": "apk"
       }
     },
-    "apkTest": {
-      "environment": "preview",
-      "distribution": "internal",
-      "env": {
-        "NODE_ENV": "production",
-        "NAMAZ_TEST_PACKAGE": "true"
-      },
-      "android": {
-        "buildType": "apk"
-      }
-    },
     "aab": {
       "environment": "production",
       "distribution": "store",

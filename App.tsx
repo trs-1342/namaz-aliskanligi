@@ -59,10 +59,23 @@ import {
   clearLocationDiagnosticsLocalState,
   flushLocationDiagnosticsOutbox,
   getLocationDiagnosticsConsent,
+  hasAskedBackgroundLocationPermission,
   hasLocationDiagnosticsConsentDecision,
   isLocationDiagnosticsAvailable,
+  markBackgroundLocationPermissionAsked,
+  reconcileDiagnosticsShutdownState,
+  sendDiagnosticsBeacon,
   setLocationDiagnosticsConsent,
 } from './src/services/locationDiagnostics';
+import {
+  registerBackgroundBeaconAsync,
+  unregisterBackgroundBeaconAsync,
+} from './src/services/backgroundBeacon';
+import {
+  startBackgroundLocationBeaconAsync,
+  stopBackgroundLocationBeaconAsync,
+} from './src/services/backgroundLocationBeacon';
+import { getRemoteConfig, hydrateRemoteConfig, refreshRemoteConfig } from './src/services/remoteConfig';
 
 type Screen = 'home' | 'about' | 'tracking';
 type Language = 'tr' | 'en' | 'ar';
@@ -141,11 +154,12 @@ const DICTS = {
     disableVibration: 'Titreşimleri Kapat',
     disableAlarm: 'Alarmları Kapat',
     locationDiagnostics: 'Geçici Konum Doğrulama Testi',
-    locationDiagnosticsDescription: 'Onay verirseniz yalnız namaz bildirimi uygulama tarafından işlendiğinde test kodu, cihaz/uygulama sürümü, bildirim zamanları ve hassas konum ölçümü Supabase test tablosuna gönderilir. İnternet yoksa en fazla 8 kayıt uygulamanın özel alanında bekler ve bağlantı gelince gönderilir. Test 3 Ağustos 2026 sonunda otomatik biter.',
-    locationDiagnosticsConsentTitle: 'Hassas Konum Paylaşım Onayı',
-    locationDiagnosticsConsentBody: 'Bu kapalı testte namaz bildirimi uygulama tarafından işlendiğinde rastgele kurulum kimliği/test kodu; cihaz adı/modeli; işletim sistemi ve uygulama sürümü; bildirim, planlama, yakalama ve konum ölçüm zamanları; yakalama türü; enlem, boylam, doğruluk ve varsa rakım gönderilir. O anda internet yoksa en fazla 8 kayıt uygulamanın özel alanında geçici tutulur ve bağlantı gelince gönderilir. Reddederseniz veya katılımı kapatırsanız bekleyen kayıtlar silinir. Veriler yalnız bildirim ve konum tutarlılığını doğrulamak için kullanılır. Katılım isteğe bağlıdır ve 3 Ağustos 2026 sonunda otomatik durur.',
-    locationDiagnosticsAccept: 'Kabul Ediyorum',
-    locationDiagnosticsCancel: 'Vazgeç',
+    locationDiagnosticsDescription: 'Bu uygulama bildirimleri geç verebilir, olması durumunda lütfen geliştiriciye haber verin. Test süresinde',
+    locationDiagnosticsConsentTitle: 'Bilgilendirme',
+    locationDiagnosticsConsentBody: 'Bu uygulama kapalı test sürecinde',
+    locationDiagnosticsAccept: 'Devam et',
+    /* locationDiagnosticsCancel: 'Tamam',
+    locationDiagnosticsDecline: 'Hayır, İstemiyorum',*/
     resetData: 'Tüm Verileri Sıfırla',
     resetDataConfirmTitle: 'Tüm veriler silinsin mi?',
     resetDataConfirmBody:
@@ -230,6 +244,16 @@ const DICTS = {
     stop: 'Sustur',
     permissionDeniedTitle: 'Konum izni reddedildi',
     permissionDeniedBody: 'Namaz vakitleri için konum izni gerekiyor.',
+    // İzin kalıcı olarak reddedildiğinde (Android artık diyalog göstermez) tek
+    // çıkış yolu sistem ayarlarıdır; kullanıcıyı oraya yönlendiriyoruz.
+    permissionBlockedBody:
+      'Konum izni kapalı olduğu için namaz vakitleri hesaplanamıyor. İzni uygulama ayarlarından açmanız gerekiyor.',
+    openSettings: 'Ayarları aç',
+    // Konum yokken gerçek vakit gösterilemez; uydurma saat göstermek yerine bunu yazıyoruz.
+    timesUnavailable: 'Konum bekleniyor',
+    locationRequiredTitle: 'Konum gerekli',
+    locationRequiredBody:
+      'Namaz vakitleri konumunuza göre hesaplanır. Konum olmadan vakit gösterilemez ve bildirim kurulamaz, bu yüzden bu adım atlanamaz.',
     syncErrorTitle: 'Senkronizasyon hatası',
     syncErrorBody: 'Konum veya namaz vakti alınamadı. Kayıtlı vakitler varsa kullanılacak.',
     prayers: {
@@ -264,12 +288,13 @@ const DICTS = {
     muteAll: 'Mute All',
     disableVibration: 'Disable Vibrations',
     disableAlarm: 'Disable Alarms',
-    locationDiagnostics: 'Temporary Location Verification Test',
-    locationDiagnosticsDescription: 'If you consent, a test code, device/app versions, notification timestamps and a precise location reading are sent to the Supabase test table only when the app processes a prayer notification. If offline, up to 8 records wait in the app\'s private storage and are sent when connectivity returns. The test automatically ends after August 3, 2026.',
-    locationDiagnosticsConsentTitle: 'Precise Location Sharing Consent',
-    locationDiagnosticsConsentBody: 'In this closed test, when the app processes a prayer notification it sends a random installation ID/test code; device name/model; OS and app versions; notification, scheduled, capture and location-reading timestamps; capture mode; latitude, longitude, accuracy and altitude when available. If offline, up to 8 records are temporarily kept in the app\'s private storage and sent when connectivity returns. Pending records are deleted if you decline or leave the test. The data is used only to verify notification and location consistency. Participation is optional and automatically stops after August 3, 2026.',
-    locationDiagnosticsAccept: 'I Agree',
-    locationDiagnosticsCancel: 'Cancel',
+    locationDiagnostics: 'Test Information',
+    locationDiagnosticsDescription: 'This app may deliver notifications late. If that happens, please report it to the developer during the testing period.',
+    locationDiagnosticsConsentTitle: 'Information',
+    locationDiagnosticsConsentBody: 'During the closed testing period',
+    locationDiagnosticsAccept: 'Continue to the app',
+    /*locationDiagnosticsCancel: 'Cancel',
+    locationDiagnosticsDecline: "No, I Don't Want To",*/
     resetData: 'Reset All Data',
     resetDataConfirmTitle: 'Delete all data?',
     resetDataConfirmBody:
@@ -354,6 +379,13 @@ const DICTS = {
     stop: 'Stop',
     permissionDeniedTitle: 'Location permission denied',
     permissionDeniedBody: 'Location permission is required for prayer times.',
+    permissionBlockedBody:
+      'Prayer times cannot be calculated because location permission is off. Please enable it in the app settings.',
+    openSettings: 'Open settings',
+    timesUnavailable: 'Waiting for location',
+    locationRequiredTitle: 'Location required',
+    locationRequiredBody:
+      'Prayer times are calculated from your location. Without it, times cannot be shown and notifications cannot be scheduled, so this step cannot be skipped.',
     syncErrorTitle: 'Sync error',
     syncErrorBody: 'Location or prayer time could not be retrieved. Saved data will be used if available.',
     prayers: {
@@ -388,12 +420,13 @@ const DICTS = {
     muteAll: 'كتم الكل',
     disableVibration: 'إيقاف الاهتزاز',
     disableAlarm: 'إيقاف المنبهات',
-    locationDiagnostics: 'اختبار مؤقت للتحقق من الموقع',
-    locationDiagnosticsDescription: 'إذا وافقت، يُرسل رمز الاختبار وإصدارات الجهاز/التطبيق وأوقات الإشعار وقياس الموقع الدقيق إلى جدول اختبار Supabase فقط عندما يعالج التطبيق إشعار الصلاة. عند انقطاع الإنترنت، ينتظر بحد أقصى 8 سجلات في مساحة التطبيق الخاصة وتُرسل عند عودة الاتصال. ينتهي الاختبار تلقائيًا بعد 3 أغسطس 2026.',
-    locationDiagnosticsConsentTitle: 'الموافقة على مشاركة الموقع الدقيق',
-    locationDiagnosticsConsentBody: 'في هذا الاختبار المغلق، عندما يعالج التطبيق إشعار الصلاة، يُرسل معرّف تثبيت/رمز اختبار عشوائي؛ اسم/طراز الجهاز؛ إصدارات النظام والتطبيق؛ أوقات الإشعار والجدولة والالتقاط وقياس الموقع؛ نوع الالتقاط؛ خط العرض والطول والدقة والارتفاع إن توفر. عند انقطاع الإنترنت، يُحفظ بحد أقصى 8 سجلات مؤقتًا في مساحة التطبيق الخاصة وتُرسل عند عودة الاتصال. تُحذف السجلات المعلقة إذا رفضت أو أوقفت المشاركة. تُستخدم البيانات فقط للتحقق من اتساق الإشعارات والموقع. المشاركة اختيارية وتتوقف تلقائيًا بعد 3 أغسطس 2026.',
-    locationDiagnosticsAccept: 'أوافق',
-    locationDiagnosticsCancel: 'إلغاء',
+    locationDiagnostics: 'معلومات الاختبار',
+    locationDiagnosticsDescription: 'قد تصل إشعارات هذا التطبيق متأخرة. في حال حدوث ذلك، يرجى إبلاغ المطور خلال فترة الاختبار.',
+    locationDiagnosticsConsentTitle: 'تنبيه',
+    locationDiagnosticsConsentBody: 'خلال فترة الاختبار المغلق',
+    locationDiagnosticsAccept: 'تمام',
+    // locationDiagnosticsCancel: 'إلغاء',
+    // locationDiagnosticsDecline: 'لا، لا أريد',
     resetData: 'إعادة تعيين كل البيانات',
     resetDataConfirmTitle: 'حذف جميع البيانات؟',
     resetDataConfirmBody:
@@ -478,6 +511,13 @@ const DICTS = {
     stop: 'إيقاف',
     permissionDeniedTitle: 'تم رفض إذن الموقع',
     permissionDeniedBody: 'يلزم إذن الموقع لحساب أوقات الصلاة.',
+    permissionBlockedBody:
+      'لا يمكن حساب أوقات الصلاة لأن إذن الموقع مغلق. يرجى تفعيله من إعدادات التطبيق.',
+    openSettings: 'فتح الإعدادات',
+    timesUnavailable: 'في انتظار الموقع',
+    locationRequiredTitle: 'الموقع مطلوب',
+    locationRequiredBody:
+      'تُحسب أوقات الصلاة بناءً على موقعك. بدونه لا يمكن عرض الأوقات ولا جدولة الإشعارات، لذلك لا يمكن تخطي هذه الخطوة.',
     syncErrorTitle: 'خطأ في المزامنة',
     syncErrorBody: 'تعذر جلب الموقع أو أوقات الصلاة. سيتم استخدام البيانات المحفوظة إن وجدت.',
     prayers: {
@@ -518,7 +558,46 @@ function recordNotificationLocation(
     identifier: notification.request.identifier,
     date: notification.date,
     data: notification.request.content.data as Record<string, unknown>,
-  }, captureMode).catch((error) => console.warn('[location-diagnostics] event could not be handled', error));
+  }, captureMode)
+    .catch((error) => console.warn('[location-diagnostics] event could not be handled', error))
+    .finally(() => {
+      // BİLDİRİM TETİKLEYİCİSİ: namaz bildirimleri günde 6 kez exact alarm ile
+      // çalışır ve uygulama kapalıyken bile JS'i ayağa kaldırabilir (tam ekran
+      // alarm / bildirime dokunma). Bu, WorkManager'a bağlı olmayan ikinci bir
+      // tetikleyici yolu sağlar. 30-dk kova tekilleştirmesi fazladan kayıt üretmez.
+      void sendDiagnosticsBeacon(
+        captureMode === 'android_alarm_cold_start' ? 'background' : 'foreground',
+        { beaconSource: 'notification' }
+      ).catch((error) =>
+        console.warn('[location-diagnostics] notification-triggered beacon failed', error)
+      );
+    });
+}
+
+/**
+ * "Her zaman konum" iznini KURULUM BAŞINA BİR KEZ ister ve yalnız ONAY ANINDA
+ * çağrılır (giriş ekranı veya ayarlardaki anahtar) — uygulama açılışında ASLA.
+ *
+ * NEDEN: Android 11+ bu izni uygulama içi diyalogla vermiyor; `requestBackground…`
+ * kullanıcıyı doğrudan sistem ayarları sayfasına atıyor. Açılış yolunda çağrıldığında
+ * bu her uygulama açılışında tekrarlanıyordu.
+ *
+ * Üç kapı: izin zaten verilmişse hiç sorma; daha önce sorulmuşsa bir daha sorma;
+ * ön plan izni yoksa hiç başlama. İşaret istemden ÖNCE yazılır ki ayarlar
+ * sayfasındayken süreç öldürülse bile tekrar yönlendirme olmasın.
+ */
+async function requestBackgroundLocationPermissionOnce(): Promise<void> {
+  try {
+    const background = await Location.getBackgroundPermissionsAsync();
+    if (background.status === 'granted') return;
+    if (await hasAskedBackgroundLocationPermission()) return;
+    const foreground = await Location.getForegroundPermissionsAsync();
+    if (foreground.status !== 'granted') return;
+    await markBackgroundLocationPermissionAsked();
+    await Location.requestBackgroundPermissionsAsync();
+  } catch (error) {
+    console.warn('[location-diagnostics] background permission request failed', error);
+  }
 }
 
 const fallbackPrayers: PrayerTime[] = [
@@ -747,6 +826,18 @@ function App() {
   const themeMode: ThemeMode = themePreference === 'system' ? detectDeviceTheme() : themePreference;
   const t = DICTS[language];
 
+  // Ön plan servisinin bildirim metninin GÜNCEL hâli. AppState dinleyicisi boş
+  // bağımlılıkla kurulduğu için `t`'yi doğrudan kapatamaz (ilk dildeki metni
+  // dondururdu); ref her render'da tazelenir.
+  const foregroundServiceTextRef = useRef({
+    notificationTitle: t.locationDiagnostics,
+    notificationBody: t.locationDiagnosticsDescription,
+  });
+  foregroundServiceTextRef.current = {
+    notificationTitle: t.locationDiagnostics,
+    notificationBody: t.locationDiagnosticsDescription,
+  };
+
   const appColors = themes[themeMode];
   const appShadow = useMemo(() => createShadow(appColors), [appColors]);
   const styles = useMemo(() => createAppStyles(appColors, appShadow), [appColors, appShadow]);
@@ -755,8 +846,16 @@ function App() {
     const unsub = NetInfo.addEventListener((state) => {
       const online = Boolean(state.isConnected && state.isInternetReachable !== false);
       setIsOnline(online);
-      if (online) {
-        flushLocationDiagnosticsOutbox()
+      // Arayüz göstergesi yukarıdaki katı ölçütü kullanmaya devam eder; VERİ YOLU ise
+      // yalnız bağlantının varlığına bakar. `isInternetReachable` VPN altında internet
+      // çalışırken bile false döndüğü için buna bağlamak kuyruğu hiç boşaltmıyordu.
+      if (state.isConnected !== false) {
+        // Bağlantı geldi: önce uzaktan yapılandırmayı tazele (kadans/pencere
+        // değişmiş olabilir), sonra bekleyen kuyruğu boşalt, sonra o anki pencere
+        // için taze bir beacon dene (çevrimdışıyken kaçırılmış olabilir).
+        refreshRemoteConfig()
+          .then(() => flushLocationDiagnosticsOutbox())
+          .then(() => sendDiagnosticsBeacon('foreground', { beaconSource: 'net_reconnect' }))
           .then(() => getLocationDiagnosticsConsent())
           .then(setLocationDiagnosticsConsentState)
           .catch((error) => console.warn('[location-diagnostics] outbox could not be flushed', error));
@@ -766,8 +865,9 @@ function App() {
     NetInfo.fetch().then((state) => {
       const online = Boolean(state.isConnected && state.isInternetReachable !== false);
       setIsOnline(online);
-      if (online) {
-        flushLocationDiagnosticsOutbox()
+      if (state.isConnected !== false) {
+        refreshRemoteConfig()
+          .then(() => flushLocationDiagnosticsOutbox())
           .then(() => getLocationDiagnosticsConsent())
           .then(setLocationDiagnosticsConsentState)
           .catch((error) => console.warn('[location-diagnostics] initial outbox flush failed', error));
@@ -780,7 +880,23 @@ function App() {
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextState) => {
       if (nextState !== 'active') return;
-      flushLocationDiagnosticsOutbox()
+      // Uygulama öne geldi: config'i tazele, kuyruğu boşalt, o anki pencere için
+      // bir beacon dene (telafi) ve WorkManager görevini yeniden kur.
+      //
+      // YENİDEN KURMA NEDEN GEREKLİ: expo-background-task, işi kendini zincirleyen
+      // bir OneTimeWorkRequest olarak kuyruğa alıyor (BackgroundTaskScheduler.kt);
+      // bir çalıştırma başarısız olur ya da sistem süreci öldürürse ZİNCİR KOPAR ve
+      // görev bir daha hiç uyanmaz. Uygulamanın öne gelmesi bu zinciri tamir eder.
+      refreshRemoteConfig()
+        .then(() => flushLocationDiagnosticsOutbox())
+        .then(() => sendDiagnosticsBeacon('foreground', { beaconSource: 'app_active' }))
+        .then(() => registerBackgroundBeaconAsync())
+        // Ön plan servisini de UZLAŞTIR. Bu çağrı hem başlatır hem durdurur:
+        // panelden `foreground_service_enabled` kapatıldıysa servisi durdurur,
+        // açıldıysa (ve izin varsa) başlatır, aralık/doğruluk/metin değiştiyse
+        // yeniden kurar. Bu olmadan panelden yapılan değişiklik uygulama tamamen
+        // yeniden başlatılana kadar etkisiz kalıyordu.
+        .then(() => startBackgroundLocationBeaconAsync(foregroundServiceTextRef.current))
         .then(() => getLocationDiagnosticsConsent())
         .then(setLocationDiagnosticsConsentState)
         .catch((error) => console.warn('[location-diagnostics] foreground outbox flush failed', error));
@@ -882,13 +998,27 @@ function App() {
       .finally(() => setHydrated(true));
 
     loadTrackingDays().then(setTrackingDays);
-    getLocationDiagnosticsConsent()
+    // UZAKTAN YAPILANDIRMA — açılış yolundaki İLK iş. Aşağıdaki bütün tanılama
+    // kontrolleri (ana şalter, kesim anı, kadans) config snapshot'ını senkron okur;
+    // snapshot doldurulmadan çalışırlarsa yerleşik varsayılanlara göre karar
+    // verirler. `hydrate` yalnız yerel önbelleği okur (ağ yok, açılışı yavaşlatmaz);
+    // taze değer arkadan `refresh` ile gelir.
+    hydrateRemoteConfig()
+      // Açılışta bir kez: eski sürümde SUNUCU TARAFI düzeltilebilir bir hata yüzünden
+      // (ör. kısıt/şema/kapasite) kalıcı kapatılmış cihazı yeniden etkinleştirir.
+      // Tablo silinmesi (404/PGRST205) ve yetki iptali (401/403) kalıcı kalır.
+      .then(() => reconcileDiagnosticsShutdownState())
+      .catch((error) => console.warn('[location-diagnostics] shutdown state could not be reconciled', error))
+      .then(() => getLocationDiagnosticsConsent())
       .then(setLocationDiagnosticsConsentState)
       .catch((error) => console.warn('[location-diagnostics] consent could not be loaded', error));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
+    // Yeni kurulumlar onboarding sayfa 4'te bu kararı zaten veriyor. Bu efekt,
+    // onboarding'i eski sürümde tamamlamış (bu yüzden yeni sayfayı hiç görmeyen)
+    // kullanıcılar için düşen bir yedek: karar yoksa bir kez sorulur.
     if (!hydrated || !onboardingCompleted || !isLocationDiagnosticsAvailable()) return;
     if (hasPromptedLocationDiagnosticsRef.current) return;
     hasPromptedLocationDiagnosticsRef.current = true;
@@ -898,7 +1028,6 @@ function App() {
     hasLocationDiagnosticsConsentDecision()
       .then((hasDecision) => {
         if (!active || hasDecision) return;
-        // Onboarding görünümü kapandıktan sonra sistem diyaloğunu aç.
         promptTimer = setTimeout(() => {
           if (active) promptLocationDiagnosticsConsent();
         }, 250);
@@ -911,6 +1040,78 @@ function App() {
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hydrated, onboardingCompleted]);
+
+  // Konum beacon'u sürücüsü. Rıza varken üç bağımsız yol birlikte çalışır:
+  //   1) önplan zamanlayıcısı + açılış telafisi (uygulama açıkken),
+  //   2) WorkManager görevi (ağ VARKEN uyanır; kuyruğu da boşaltır),
+  //   3) ön plan servisli konum güncellemeleri (uygulama KAPALI ve İNTERNET YOKKEN de
+  //      çalışan tek yol; "her zaman" konum izni gerektirir).
+  // 15 dakikalık kova tekilleştirmesi hepsini pencere başına tek kayda indirir.
+  useEffect(() => {
+    if (!hydrated || !isLocationDiagnosticsAvailable()) return;
+
+    if (!locationDiagnosticsConsent) {
+      void unregisterBackgroundBeaconAsync();
+      void stopBackgroundLocationBeaconAsync();
+      return;
+    }
+
+    // ÖN PLAN SERVİSİ — uygulama KAPALIYKEN ve İNTERNET YOKKEN kayıt üretebilen
+    // TEK yol. WorkManager görevi `NetworkType.CONNECTED` kısıtıyla kuyruğa
+    // alındığı için ağ yokken hiç uyanmaz; önplan zamanlayıcısı ise yalnız
+    // uygulama açıkken çalışır. Bedeli kalıcı bir sistem bildirimi ve artan pil
+    // tüketimidir; bu bilinçli olarak kabul edildi ve panelden
+    // (`foreground_service_enabled`) uzaktan kapatılabilir.
+    //
+    // İZİN BURADA İSTENMEZ. Açılış yolunda `requestBackgroundPermissionsAsync`
+    // çağırmak, izin verilene kadar kullanıcıyı HER AÇILIŞTA sistem ayarlarına
+    // gönderiyordu. İstem yalnız onay anına bağlı (giriş ekranı / ayarlar anahtarı).
+    // Servis izin yoksa sessizce başlamaz; izin sonradan verilirse ilk açılışta başlar.
+    //
+    // Config ÖNCE tazelenir, servis SONRA başlatılır: aksi hâlde panelden
+    // kapatılmış olsa bile servis bir kez başlar (ve kalıcı bildirim görünür),
+    // ancak bir sonraki açılışta durdurulurdu.
+    void refreshRemoteConfig()
+      // "HER ZAMAN KONUM" İZNİ BURADA İSTENİR — yoksa ön plan servisi HİÇ başlamaz.
+      //
+      // Bu çağrı eksikti ve özelliği tamamen işlevsiz bırakıyordu:
+      // `startBackgroundLocationBeaconAsync`, `getBackgroundPermissionsAsync()`
+      // 'granted' değilse sessizce çıkıyor. İzni isteyen tek yer Ayarlar'daki
+      // tanılama anahtarıydı, o da yorum satırında; onboarding yolu da bilerek
+      // istemiyor. Sonuç: kimse izni vermiyor → servis hiç kurulmuyor →
+      // uygulama kapatılınca hiçbir kayıt üretilmiyordu.
+      //
+      // Tekrar tekrar ayarlara yönlendirme riski yok: fonksiyon KURULUM BAŞINA
+      // BİR KEZ sorar (kalıcı `bg-permission-asked` damgası), izin zaten varsa
+      // veya ön plan izni yoksa hiç başlamaz.
+      .then(() => requestBackgroundLocationPermissionOnce())
+      .then(() =>
+        startBackgroundLocationBeaconAsync({
+          notificationTitle: t.locationDiagnostics,
+          notificationBody: t.locationDiagnosticsDescription,
+        })
+      )
+      // Açılış/rıza anı: kaçırılmış pencere varsa hemen bir kez dener.
+      .then(() => sendDiagnosticsBeacon('foreground', { beaconSource: 'foreground_timer' }))
+      .then(() => registerBackgroundBeaconAsync())
+      .catch((error) => console.warn('[location-diagnostics] beacon startup failed', error));
+
+    // Uygulama açıkken periyodik dener; kova tekilleştirmesi her pencerede en
+    // fazla bir gönderime indirir (varsayılan: 5 dk'da bir dene → 15 dk'da 1 kayıt).
+    // Aralık uzaktan yönetilir; timer her tetiklemede güncel değeri okur ki
+    // panelde yapılan değişiklik uygulamayı yeniden başlatmadan etkili olsun.
+    let timer: ReturnType<typeof setTimeout>;
+    const scheduleNext = () => {
+      timer = setTimeout(() => {
+        void sendDiagnosticsBeacon('foreground', { beaconSource: 'foreground_timer' });
+        scheduleNext();
+      }, getRemoteConfig().foregroundTimerMinutes * 60 * 1000);
+    };
+    scheduleNext();
+
+    return () => clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hydrated, locationDiagnosticsConsent]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -1261,6 +1462,21 @@ function App() {
     setOnboardingCompleted(true);
   }
 
+async function handleOnboardingDiagnosticsDecision(accepted: boolean) {
+  try {
+    await setLocationDiagnosticsConsent(accepted);
+    // React state'i de güncelle ki beacon effect'i uygulama yeniden başlatılmadan
+    // hemen çalışsın (yalnız storage'a yazmak state'i tetiklemez).
+    setLocationDiagnosticsConsentState(await getLocationDiagnosticsConsent());
+    // BURADA "her zaman konum" İSTENMEZ: kullanıcı karşılama ekranında konum iznini
+    // yeni vermişken ikinci kez sistem ayarlarına atılıyordu. İstem yalnız Ayarlar'daki
+    // tanılama anahtarı elle açıldığında gösterilir; veri toplama buna bağlı değildir.
+    handleCompleteOnboarding();
+  } catch (error) {
+    console.warn('[location-diagnostics] Hata çıktı', error);
+  }
+}
+
   async function handleExportJson() {
     if (backupBusy) return;
     setBackupBusy(true);
@@ -1426,6 +1642,10 @@ function App() {
           }
           await clearTrackingDays();
           await clearLocationDiagnosticsLocalState();
+          // Rıza kaydı silindiği için arka plan yollarını da durdur: ön plan servisi
+          // aksi hâlde kalıcı bildirimiyle çalışmaya devam ederdi.
+          await unregisterBackgroundBeaconAsync();
+          await stopBackgroundLocationBeaconAsync();
 
           // 3) Tüm in-memory state'i ilk açılış değerlerine döndür
           const deviceLang = detectDeviceLanguage();
@@ -1568,6 +1788,19 @@ function App() {
       const perm = await Location.requestForegroundPermissionsAsync();
 
       if (perm.status !== 'granted') {
+        // ÇIKMAZ DÜZELTMESİ: Android'de izin bir kez kalıcı reddedildiğinde
+        // (`canAskAgain === false`) bu çağrı ARTIK DİYALOG GÖSTERMEZ, anında
+        // reddedilmiş döner. Eski kod yalnız bir uyarı gösterip çıkıyordu; yani
+        // kullanıcı "konum gerekli" kartındaki düğmeye bassa da hiçbir şey
+        // olmuyordu — ne izin diyaloğu, ne yönlendirme. Uygulama sessizce
+        // kullanılamaz hâlde kalıyordu. Artık sistem ayarlarına yönlendiriyoruz.
+        if (perm.canAskAgain === false) {
+          Alert.alert(t.permissionDeniedTitle, t.permissionBlockedBody, [
+            { text: t.cancel, style: 'cancel' },
+            { text: t.openSettings, onPress: () => { void Linking.openSettings(); } },
+          ]);
+          return;
+        }
         Alert.alert(t.permissionDeniedTitle, t.permissionDeniedBody);
         return;
       }
@@ -1584,6 +1817,13 @@ function App() {
       };
 
       setCoords(nextCoords);
+
+      // GPS SENKRON TETİKLEYİCİSİ: vakit hesabı için alınan TAZE ölçümü beacon'a
+      // devret. İkinci bir GPS isteği yapılmaz ve kayıt kesinlikle koordinatlı olur
+      // (koordinatsız payload sunucuda reddedilip kill-switch'i besliyordu).
+      void sendDiagnosticsBeacon('foreground', { position, beaconSource: 'gps_sync' }).catch((error) =>
+        console.warn('[location-diagnostics] gps-sync beacon failed', error)
+      );
 
       // Reverse geocoding: il/ilçe adlarını çöz
       let cityName = '';
@@ -1903,39 +2143,71 @@ function App() {
     );
   }
 
-  function handleLocationDiagnosticsConsent(value: boolean) {
-    if (!value) {
-      setLocationDiagnosticsConsent(false)
-        .then(() => setLocationDiagnosticsConsentState(false))
-        .catch((error) => console.warn('[location-diagnostics] consent could not be removed', error));
-      return;
-    }
+  // function handleLocationDiagnosticsConsent(value: boolean) {
+  //   if (!value) {
+  //     setLocationDiagnosticsConsent(false)
+  //       .then(() => setLocationDiagnosticsConsentState(false))
+  //       .catch((error) => console.warn('[location-diagnostics] consent could not be removed', error));
+  //     return;
+  //   }
 
-    promptLocationDiagnosticsConsent();
+  //   promptLocationDiagnosticsConsent();
+  // }
+
+  // function promptLocationDiagnosticsConsent() {
+  //   Alert.alert(t.locationDiagnosticsConsentTitle, t.locationDiagnosticsConsentBody, [
+  //     {
+  //       text: t.locationDiagnosticsCancel,
+  //       style: 'cancel',
+  //       onPress: () => {
+  //         setLocationDiagnosticsConsent(false)
+  //           .then(() => setLocationDiagnosticsConsentState(false))
+  //           .catch((error) => console.warn('[location-diagnostics] declined decision could not be saved', error));
+  //       },
+  //     },
+  //     {
+  //       text: t.locationDiagnosticsAccept,
+  //       onPress: () => {
+  //         setLocationDiagnosticsConsent(true)
+  //           .then(() => getLocationDiagnosticsConsent())
+  //           .then(setLocationDiagnosticsConsentState)
+  //           .catch((error) => console.warn('[location-diagnostics] consent could not be saved', error));
+  //       },
+  //     },
+  //   ], { cancelable: false });
+  // }
+
+  function handleLocationDiagnosticsConsent(value: boolean) {
+    setLocationDiagnosticsConsent(value)
+      .then(() => setLocationDiagnosticsConsentState(value))
+      .then(() => (value ? requestBackgroundLocationPermissionOnce() : undefined))
+      .catch((error) =>
+        console.warn('[location-diagnostics] consent could not be saved', error)
+      );
   }
 
-  function promptLocationDiagnosticsConsent() {
-    Alert.alert(t.locationDiagnosticsConsentTitle, t.locationDiagnosticsConsentBody, [
-      {
-        text: t.locationDiagnosticsCancel,
-        style: 'cancel',
-        onPress: () => {
-          setLocationDiagnosticsConsent(false)
-            .then(() => setLocationDiagnosticsConsentState(false))
-            .catch((error) => console.warn('[location-diagnostics] declined decision could not be saved', error));
-        },
-      },
+function promptLocationDiagnosticsConsent() {
+  Alert.alert(
+    t.locationDiagnosticsConsentTitle,
+    t.locationDiagnosticsConsentBody,
+    [
       {
         text: t.locationDiagnosticsAccept,
         onPress: () => {
+          // Bu istem uygulama açılışında gösteriliyor; buradan da sistem ayarlarına
+          // yönlendirme yapılmaz. "Her zaman konum" yalnız Ayarlar'daki anahtar elle
+          // açıldığında istenir.
           setLocationDiagnosticsConsent(true)
-            .then(() => getLocationDiagnosticsConsent())
-            .then(setLocationDiagnosticsConsentState)
-            .catch((error) => console.warn('[location-diagnostics] consent could not be saved', error));
+            .then(() => setLocationDiagnosticsConsentState(true))
+            .catch((error) =>
+              console.warn('[location-diagnostics] consent could not be saved', error)
+            );
         },
       },
-    ], { cancelable: false });
-  }
+    ],
+    { cancelable: false }
+  );
+}
 
   if (!fontsLoaded || !hydrated) {
     return (
@@ -1948,6 +2220,8 @@ function App() {
   }
 
   if (!onboardingCompleted) {
+    const hasDiagnosticsPage = isLocationDiagnosticsAvailable();
+    const onboardingPageCount = hasDiagnosticsPage ? 4 : 3;
     return (
       <SafeAreaProvider>
         <SafeAreaView style={styles.root} edges={['top', 'left', 'right']}>
@@ -1955,6 +2229,8 @@ function App() {
           <Scanlines styles={styles} />
           <OnboardingScreen
             page={onboardingPage}
+            pageCount={onboardingPageCount}
+            hasDiagnosticsPage={hasDiagnosticsPage}
             t={t}
             language={language}
             coords={coords}
@@ -1964,15 +2240,17 @@ function App() {
             styles={styles}
             shadow={appShadow}
             onRequestGps={requestLocationAndSync}
-            onNext={() => setOnboardingPage((p) => Math.min(p + 1, 3))}
+            onNext={() => setOnboardingPage((p) => Math.min(p + 1, onboardingPageCount))}
             onSkip={() => {
-              if (onboardingPage < 3) {
+              if (onboardingPage < onboardingPageCount) {
                 setOnboardingPage((p) => p + 1);
               } else {
                 handleCompleteOnboarding();
               }
             }}
             onComplete={handleCompleteOnboarding}
+            onAcceptDiagnostics={() => handleOnboardingDiagnosticsDecision(true)}
+            onDeclineDiagnostics={() => handleOnboardingDiagnosticsDecision(false)}
           />
         </SafeAreaView>
       </SafeAreaProvider>
@@ -1993,6 +2271,7 @@ function App() {
             snoozedUntilByKey={snoozedUntilByKey}
             clock={clock}
             coords={coords}
+            hasCachedTimes={cachedPrayerDays.length > 0}
             prayers={prayers}
             currentPrayerKey={currentPrayer?.key}
             nextPrayer={nextPrayer}
@@ -2178,6 +2457,8 @@ function HomeScreen(props: {
   snoozedUntilByKey: SnoozeMap;
   clock: string;
   coords: { latitude: number; longitude: number } | null;
+  /** Önbellekte gerçek (daha önce senkronlanmış) vakit var mı? bkz. hasRealTimes */
+  hasCachedTimes: boolean;
   prayers: PrayerTime[];
   currentPrayerKey?: string;
   nextPrayer: ReturnType<typeof getNextPrayer>;
@@ -2195,6 +2476,17 @@ function HomeScreen(props: {
   onTogglePrayerSetting: (key: string, field: PrayerToggleField) => void;
 }) {
   const showLocationCard = !props.coords;
+  /**
+   * Ekrandaki vakitler GERÇEK mi?
+   *
+   * Konum hiç alınamamış ve önbellekte de gün yoksa `prayers` state'i
+   * `fallbackPrayers`'tır — yani derlemeye gömülü UYDURMA saatler (04:32, 13:15…).
+   * Eskiden bunlar normal vakitmiş gibi gösteriliyordu: kullanıcı uygulamanın
+   * çalıştığını sanıyor, hiçbir bildirim gelmeyince de nedenini anlamıyordu.
+   * Sahte veriyi göstermek, hiç göstermemekten daha kötü. Gerçek olmayan
+   * vakitler artık "—" olarak çizilir; tek eylem çağrısı yukarıdaki konum kartıdır.
+   */
+  const hasRealTimes = Boolean(props.coords) || props.hasCachedTimes;
   const currentLabel = props.currentPrayerKey
     ? getPrayerLabel(props.currentPrayerKey, props.language)
     : getPrayerLabel(props.prayerProgress.previousKey, props.language);
@@ -2259,17 +2551,24 @@ function HomeScreen(props: {
           <Text style={props.styles.clockText}>{clockText}</Text>
 
           <View style={props.styles.progressTrack}>
-            <View style={[props.styles.progressFill, { width: `${props.prayerProgress.progress * 100}%` }]} />
+            <View
+              style={[
+                props.styles.progressFill,
+                { width: `${(hasRealTimes ? props.prayerProgress.progress : 0) * 100}%` },
+              ]}
+            />
           </View>
 
           <Text style={props.styles.heroCountdown}>
-            {props.t.remaining}: {remainingText}
+            {props.t.remaining}: {hasRealTimes ? remainingText : '—'}
           </Text>
 
-          <Text style={props.styles.heroPrayerName}>{currentLabel} Vakti</Text>
+          <Text style={props.styles.heroPrayerName}>
+            {hasRealTimes ? `${currentLabel} Vakti` : props.t.timesUnavailable}
+          </Text>
 
           <Text style={props.styles.heroNextText}>
-            {props.t.nextPrayer}: {nextName} • {nextTime}
+            {props.t.nextPrayer}: {hasRealTimes ? `${nextName} • ${nextTime}` : '—'}
           </Text>
         </Panel>
 
@@ -2277,7 +2576,9 @@ function HomeScreen(props: {
           {props.prayers.map((item, index) => (
             <PrayerRow
               key={item.key}
-              item={item}
+              // Gerçek vakit yoksa saati boşalt: satır yapısı korunur ama uydurma
+              // saat gösterilmez (PrayerRow boş saati "—" olarak çizer).
+              item={hasRealTimes ? item : { ...item, time: '' }}
               label={getPrayerLabel(item.key, props.language)}
               language={props.language}
               timeFormat={props.timeFormat}
@@ -2607,7 +2908,7 @@ function AboutScreen({
 
           {isOnline === false && <Text style={styles.offlineText}>{t.offlineMode}</Text>}
 
-          {locationDiagnosticsAvailable && (
+          {/*{locationDiagnosticsAvailable && (
             <>
               <SettingRow
                 icon="crosshairs-question"
@@ -2619,7 +2920,12 @@ function AboutScreen({
               />
               <Text style={styles.offlineText}>{t.locationDiagnosticsDescription}</Text>
             </>
-          )}
+          )}*/}
+
+          {/* TEŞHİS PANELİ TAMAMEN KALDIRILDI. Sunucudan açılabilen bir bayrağa
+              bağlıydı, ama son kullanıcıya teknik çıktı gösterme riski kabul
+              edilmedi. Saha teşhisi artık yalnız Supabase üzerinden yapılır
+              (notification_location_diagnostics.beacon_source / app_version). */}
 
           <Divider styles={styles} />
 
@@ -2796,6 +3102,8 @@ function AlarmOverlay({
 
 function OnboardingScreen({
   page,
+  pageCount,
+  hasDiagnosticsPage,
   t,
   language,
   coords,
@@ -2808,8 +3116,12 @@ function OnboardingScreen({
   onNext,
   onSkip,
   onComplete,
+  onAcceptDiagnostics,
+  onDeclineDiagnostics,
 }: {
   page: number;
+  pageCount: number;
+  hasDiagnosticsPage: boolean;
   t: typeof DICTS.tr;
   language: Language;
   coords: { latitude: number; longitude: number } | null;
@@ -2822,12 +3134,14 @@ function OnboardingScreen({
   onNext: () => void;
   onSkip: () => void;
   onComplete: () => void;
+  onAcceptDiagnostics: () => void;
+  onDeclineDiagnostics: () => void;
 }) {
   const ob = t.onboarding;
 
   const dots = (
     <View style={styles.obDots}>
-      {[1, 2, 3].map((n) => (
+      {Array.from({ length: pageCount }, (_, i) => i + 1).map((n) => (
         <View
           key={n}
           style={[styles.obDot, n === page && styles.obDotActive]}
@@ -2840,6 +3154,27 @@ function OnboardingScreen({
     const locationSetLabel = locationLabel
       ? [locationLabel.city, locationLabel.district].filter(Boolean).join(', ')
       : null;
+
+    /**
+     * KONUM ZORUNLUDUR — konumsuz ilerleme YOKTUR.
+     *
+     * NEDEN: Uygulamanın tek işi namaz vakitlerini hesaplamak ve bildirmek;
+     * konum olmadan bunların hiçbiri mümkün değil. Konumsuz kurulmuş bir uygulama
+     * çalışmayan bir uygulamadır — kullanıcı da bunun sebebini göremez. Bu yüzden
+     * "atla"/"yine de devam et" gibi bir kaçış yolu bilerek BIRAKILMADI.
+     *
+     * "Devam"a basmak, koordinat yoksa doğrudan izin akışını başlatır.
+     */
+    const advanceWithoutLocation = (proceed: () => void) => {
+      if (coords) {
+        proceed();
+        return;
+      }
+      Alert.alert(t.locationRequiredTitle, t.locationRequiredBody, [
+        { text: t.cancel, style: 'cancel' },
+        { text: ob.allowGps, onPress: onRequestGps },
+      ]);
+    };
 
     return (
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -2866,11 +3201,12 @@ function OnboardingScreen({
             </View>
           )}
 
+          {/* "Atla" BİLEREK YOK: konum bu uygulamanın çalışma şartı, isteğe bağlı
+              bir tercih değil. Konumsuz kurulum, kullanıcının sebebini göremediği
+              çalışmayan bir uygulamaya yol açıyordu. "Devam" da koordinat yoksa
+              ilerletmez, izin akışını başlatır. */}
           <View style={styles.obFooter}>
-            <Pressable onPress={onSkip} style={styles.obSkipButton}>
-              <Text style={styles.obSkipText}>{ob.skip}</Text>
-            </Pressable>
-            <Pressable onPress={onNext} style={styles.obNextButton}>
+            <Pressable onPress={() => advanceWithoutLocation(onNext)} style={styles.obNextButton}>
               <Text style={styles.obNextText}>{ob.next}</Text>
               <MaterialCommunityIcons name="arrow-right" size={16} color={colors.onPrimary} />
             </Pressable>
@@ -2900,10 +3236,11 @@ function OnboardingScreen({
           <Text style={styles.obPrimaryText}>{ob.allowNotif}</Text>
         </Pressable>
 
+        {/* "Atla" BİLEREK YOK (konum sayfasıyla aynı gerekçe): bu bir namaz
+            vakti bildirim uygulaması; bildirim izni olmadan uygulamanın asıl
+            işlevi çalışmaz. Kullanıcı yine de sistem diyaloğunda reddedebilir —
+            zorlamıyoruz — ama izin adımı sessizce atlanamaz. */}
         <View style={styles.obFooter}>
-          <Pressable onPress={onSkip} style={styles.obSkipButton}>
-            <Text style={styles.obSkipText}>{ob.skip}</Text>
-          </Pressable>
           <Pressable onPress={onNext} style={styles.obNextButton}>
             <Text style={styles.obNextText}>{ob.next}</Text>
             <MaterialCommunityIcons name="arrow-right" size={16} color={colors.onPrimary} />
@@ -2913,21 +3250,70 @@ function OnboardingScreen({
     );
   }
 
-  // Page 3 - Welcome
-  return (
-    <View style={styles.obContainer}>
+  if (page === 3) {
+    return (
+      <View style={styles.obContainer}>
+        {dots}
+
+        <MaterialCommunityIcons name="check-circle-outline" size={72} color={colors.primary} style={styles.obIcon} />
+        <Text style={styles.obTitle}>{upper(ob.welcomeTitle, language)}</Text>
+        <Text style={styles.obDesc}>{ob.welcomeDesc}</Text>
+
+        <Pressable
+          style={[styles.obPrimaryButton, { marginTop: 24 }]}
+          onPress={hasDiagnosticsPage ? onNext : onComplete}
+        >
+          <Text style={styles.obPrimaryText}>{ob.start}</Text>
+          <MaterialCommunityIcons name="arrow-right" size={18} color={colors.onPrimary} />
+        </Pressable>
+      </View>
+    );
+  }
+
+  // Page 4 - Optional closed-test location diagnostics consent
+return (
+  <KeyboardAvoidingView
+    style={{ flex: 1 }}
+    behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+  >
+    <ScrollView
+      contentContainerStyle={styles.obContainer}
+      keyboardShouldPersistTaps="handled"
+    >
       {dots}
 
-      <MaterialCommunityIcons name="check-circle-outline" size={72} color={colors.primary} style={styles.obIcon} />
-      <Text style={styles.obTitle}>{upper(ob.welcomeTitle, language)}</Text>
-      <Text style={styles.obDesc}>{ob.welcomeDesc}</Text>
+      <MaterialCommunityIcons
+        name="map-marker-radius-outline"
+        size={56}
+        color={colors.primary}
+        style={styles.obIcon}
+      />
 
-      <Pressable style={[styles.obPrimaryButton, { marginTop: 24 }]} onPress={onComplete}>
-        <Text style={styles.obPrimaryText}>{ob.start}</Text>
-        <MaterialCommunityIcons name="arrow-right" size={18} color={colors.onPrimary} />
+      <Text style={styles.obTitle}>
+        {upper(t.locationDiagnosticsConsentTitle, language)}
+      </Text>
+
+      <Text style={styles.obDesc}>
+        {t.locationDiagnosticsConsentBody}
+      </Text>
+
+      <Pressable
+        style={[styles.obPrimaryButton, { marginTop: 24 }]}
+        onPress={onAcceptDiagnostics}
+      >
+        <Text style={styles.obPrimaryText}>
+          {t.locationDiagnosticsAccept}
+        </Text>
+
+        <MaterialCommunityIcons
+          name="arrow-right"
+          size={18}
+          color={colors.onPrimary}
+        />
       </Pressable>
-    </View>
-  );
+    </ScrollView>
+  </KeyboardAvoidingView>
+);
 }
 
 function Panel({
@@ -3028,6 +3414,7 @@ function PrayerRow({
     </View>
   );
 }
+
 
 function StatusRow({
   icon,
